@@ -339,10 +339,11 @@ func (c *AdminClient) ListUsers(ctx context.Context, token, from string, limit i
 
 // MatrixLoginResponse represents the session response returned when logging in as a user
 type MatrixLoginResponse struct {
-	AccessToken string `json:"access_token"`
-	DeviceID    string `json:"device_id"`
-	HomeServer  string `json:"home_server"`
-	UserID      string `json:"user_id"`
+	AccessToken   string `json:"access_token"`
+	DeviceID      string `json:"device_id"`
+	HomeServer    string `json:"home_server"`
+	UserID        string `json:"user_id"`
+	SupportRoomID string `json:"support_room_id,omitempty"`
 }
 
 // LoginAsUser logs in as a specified user using the Synapse Admin API (POST /_synapse/admin/v1/users/<user_id>/login)
@@ -371,4 +372,214 @@ func (c *AdminClient) LoginAsUser(ctx context.Context, token, rawUserID string) 
 		return nil, err
 	}
 	return &loginResp, nil
+}
+
+// CreateDirectRoom creates a 1-on-1 private direct message room inviting the target user
+func (c *AdminClient) CreateDirectRoom(ctx context.Context, userToken, targetUserID, name, topic string) (string, error) {
+	createPayload := map[string]interface{}{
+		"is_direct":  true,
+		"preset":     "trusted_private_chat",
+		"visibility": "private",
+		"invite":     []string{c.FormatUserID(targetUserID)},
+		"name":       name,
+		"topic":      topic,
+		"initial_state": []map[string]interface{}{
+			{
+				"type":      "m.room.guest_access",
+				"state_key": "",
+				"content":   map[string]string{"guest_access": "can_join"},
+			},
+			{
+				"type":      "m.room.history_visibility",
+				"state_key": "",
+				"content":   map[string]string{"history_visibility": "shared"},
+			},
+		},
+	}
+
+	respBytes, statusCode, err := c.doRequest(ctx, userToken, http.MethodPost, "/_matrix/client/v3/createRoom", createPayload)
+	if err != nil {
+		return "", err
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return "", &apiErr
+	}
+
+	var result struct {
+		RoomID string `json:"room_id"`
+	}
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return "", fmt.Errorf("failed to parse createRoom response: %w", err)
+	}
+
+	return result.RoomID, nil
+}
+
+// JoinUserToRoom forces a user to join a room via the Synapse Admin API
+func (c *AdminClient) JoinUserToRoom(ctx context.Context, token, roomID, rawUserID string) error {
+	fullUserID := c.FormatUserID(rawUserID)
+	path := fmt.Sprintf("/_synapse/admin/v1/join/%s", url.PathEscape(roomID))
+	payload := map[string]string{"user_id": fullUserID}
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+
+	if statusCode == http.StatusOK {
+		return nil
+	}
+
+	// Fallback to alternate room-specific admin join path if applicable
+	altPath := fmt.Sprintf("/_synapse/admin/v1/rooms/%s/join", url.PathEscape(roomID))
+	_, statusCode2, err2 := c.doRequest(ctx, token, http.MethodPost, altPath, payload)
+	if err2 == nil && statusCode2 == http.StatusOK {
+		return nil
+	}
+
+	var apiErr AdminAPIError
+	apiErr.StatusCode = statusCode
+	_ = json.Unmarshal(respBytes, &apiErr)
+	if apiErr.ErrorMsg == "" {
+		apiErr.ErrorMsg = string(respBytes)
+	}
+	return &apiErr
+}
+
+// GetUserJoinedRooms queries the room IDs that a user is currently joined to
+func (c *AdminClient) GetUserJoinedRooms(ctx context.Context, token, rawUserID string) ([]string, error) {
+	fullUserID := c.FormatUserID(rawUserID)
+	path := fmt.Sprintf("/_synapse/admin/v1/users/%s/joined_rooms", url.PathEscape(fullUserID))
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return nil, &apiErr
+	}
+
+	var resp struct {
+		JoinedRooms []string `json:"joined_rooms"`
+		Total       int      `json:"total"`
+	}
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, err
+	}
+	return resp.JoinedRooms, nil
+}
+
+// GetRoomMembers retrieves all user IDs joined in a given room
+func (c *AdminClient) GetRoomMembers(ctx context.Context, token, roomID string) ([]string, error) {
+	path := fmt.Sprintf("/_synapse/admin/v1/rooms/%s/members", url.PathEscape(roomID))
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return nil, &apiErr
+	}
+
+	var resp struct {
+		Members []string `json:"members"`
+		Total   int      `json:"total"`
+	}
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Members, nil
+}
+
+// GetUserDirectRooms queries a user's m.direct account data
+func (c *AdminClient) GetUserDirectRooms(ctx context.Context, token, rawUserID string) (map[string][]string, error) {
+	fullUserID := c.FormatUserID(rawUserID)
+	path := fmt.Sprintf("/_matrix/client/v3/user/%s/account_data/m.direct", url.PathEscape(fullUserID))
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusNotFound {
+		return make(map[string][]string), nil
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return nil, &apiErr
+	}
+
+	var directData map[string][]string
+	if err := json.Unmarshal(respBytes, &directData); err != nil {
+		return make(map[string][]string), nil
+	}
+	return directData, nil
+}
+
+// SetUserDirectRooms updates a user's m.direct account data
+func (c *AdminClient) SetUserDirectRooms(ctx context.Context, token, rawUserID string, data map[string][]string) error {
+	fullUserID := c.FormatUserID(rawUserID)
+	path := fmt.Sprintf("/_matrix/client/v3/user/%s/account_data/m.direct", url.PathEscape(fullUserID))
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodPut, path, data)
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return &apiErr
+	}
+	return nil
+}
+
+// AddUserDirectRoom appends a room ID to the user's m.direct mapping for the specified target user
+func (c *AdminClient) AddUserDirectRoom(ctx context.Context, token, rawUserID, targetUserID, roomID string) error {
+	directData, err := c.GetUserDirectRooms(ctx, token, rawUserID)
+	if err != nil {
+		directData = make(map[string][]string)
+	}
+
+	fullTargetID := c.FormatUserID(targetUserID)
+	rooms := directData[fullTargetID]
+	for _, id := range rooms {
+		if id == roomID {
+			return nil // already recorded
+		}
+	}
+
+	directData[fullTargetID] = append(rooms, roomID)
+	return c.SetUserDirectRooms(ctx, token, rawUserID, directData)
 }

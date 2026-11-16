@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
 	"chat-htp-api/internal/config"
+	"chat-htp-api/internal/models"
 	"chat-htp-api/internal/oidc"
 	"chat-htp-api/internal/synapse"
 
@@ -81,7 +83,115 @@ func (h *AuthHandler) provisionMatrixUserAndLogin(ctx context.Context, profile *
 		return nil, fmt.Errorf("failed to generate Matrix session for user: %w", err)
 	}
 
+	// 3. Ensure default 1-on-1 direct message room with customer support
+	supportRoomID, err := h.ensureCustomerSupportRoom(ctx, matrixSession.AccessToken, matrixSession.UserID)
+	if err != nil {
+		log.Printf("[WARN] Failed to ensure default customer support room for %s: %v", matrixSession.UserID, err)
+	} else {
+		matrixSession.SupportRoomID = supportRoomID
+	}
+
 	return matrixSession, nil
+}
+
+// ensureCustomerSupportRoom ensures that a 1-on-1 direct message room exists between the user
+// and the customer support account. If a room already exists, it is reused instead of creating a duplicate.
+func (h *AuthHandler) ensureCustomerSupportRoom(ctx context.Context, userToken, userID string) (string, error) {
+	supportUserID := h.cfg.GetSupportUserID()
+	if supportUserID == "" {
+		return "", fmt.Errorf("customer support user ID is not configured")
+	}
+
+	// 1. Check PostgreSQL Database if available
+	if h.db != nil {
+		var roomRecord models.CustomerSupportRoom
+		err := h.db.WithContext(ctx).
+			Where("user_id = ? AND support_user_id = ?", userID, supportUserID).
+			First(&roomRecord).Error
+		if err == nil && roomRecord.RoomID != "" {
+			return roomRecord.RoomID, nil
+		}
+	}
+
+	// 2. Check Matrix m.direct account data on the user
+	directData, err := h.adminClient.GetUserDirectRooms(ctx, userToken, userID)
+	if err == nil {
+		if rooms, ok := directData[supportUserID]; ok && len(rooms) > 0 {
+			existingRoomID := rooms[0]
+			if h.db != nil {
+				_ = h.db.WithContext(ctx).Create(&models.CustomerSupportRoom{
+					RoomID:        existingRoomID,
+					UserID:        userID,
+					SupportUserID: supportUserID,
+				}).Error
+			}
+			return existingRoomID, nil
+		}
+	}
+
+	// 3. Check Synapse joined rooms for common membership
+	userRooms, err := h.adminClient.GetUserJoinedRooms(ctx, "", userID)
+	if err == nil {
+		for _, roomID := range userRooms {
+			members, err := h.adminClient.GetRoomMembers(ctx, "", roomID)
+			if err == nil {
+				hasUser := false
+				hasSupport := false
+				for _, m := range members {
+					if m == userID {
+						hasUser = true
+					}
+					if m == supportUserID {
+						hasSupport = true
+					}
+				}
+				if hasUser && hasSupport {
+					_ = h.adminClient.AddUserDirectRoom(ctx, userToken, userID, supportUserID, roomID)
+					_ = h.adminClient.AddUserDirectRoom(ctx, "", supportUserID, userID, roomID)
+					if h.db != nil {
+						_ = h.db.WithContext(ctx).Create(&models.CustomerSupportRoom{
+							RoomID:        roomID,
+							UserID:        userID,
+							SupportUserID: supportUserID,
+						}).Error
+					}
+					return roomID, nil
+				}
+			}
+		}
+	}
+
+	// 4. No room exists: create a new 1-on-1 direct message room
+	roomName := fmt.Sprintf("Support: %s", h.cfg.SupportDisplayName)
+	roomTopic := "Direct 1-on-1 customer support chat"
+	roomID, err := h.adminClient.CreateDirectRoom(ctx, userToken, supportUserID, roomName, roomTopic)
+	if err != nil {
+		return "", fmt.Errorf("failed to create 1:1 support room: %w", err)
+	}
+
+	// 5. Force-join support account to the newly created room
+	if err := h.adminClient.JoinUserToRoom(ctx, "", roomID, supportUserID); err != nil {
+		log.Printf("[WARN] Failed to auto-join support user %s to room %s: %v", supportUserID, roomID, err)
+	}
+
+	// 6. Record in m.direct account data for both user and support
+	_ = h.adminClient.AddUserDirectRoom(ctx, userToken, userID, supportUserID, roomID)
+	_ = h.adminClient.AddUserDirectRoom(ctx, "", supportUserID, userID, roomID)
+
+	// 7. Persist to PostgreSQL database (triggers BeforeCreate for UUID v7)
+	if h.db != nil {
+		roomRecord := models.CustomerSupportRoom{
+			RoomID:        roomID,
+			UserID:        userID,
+			SupportUserID: supportUserID,
+		}
+		if err := h.db.WithContext(ctx).Create(&roomRecord).Error; err != nil {
+			log.Printf("[WARN] Failed to save customer support room to database: %v", err)
+		}
+	}
+
+	log.Printf("[INFO] Established default 1:1 customer support room: %s (user: %s, support: %s)", roomID, userID, supportUserID)
+	return roomID, nil
 }
 
 // Login handles GET /api-server/auth/login
@@ -153,7 +263,8 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	}
 
 	responseData := gin.H{
-		"matrix": matrixSession,
+		"matrix":          matrixSession,
+		"support_room_id": matrixSession.SupportRoomID,
 		"user": gin.H{
 			"sub":          profile.Sub,
 			"name":         profile.Name,
@@ -234,7 +345,8 @@ func (h *AuthHandler) Exchange(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"matrix": matrixSession,
+		"matrix":          matrixSession,
+		"support_room_id": matrixSession.SupportRoomID,
 		"user": gin.H{
 			"sub":          profile.Sub,
 			"name":         profile.Name,
@@ -338,7 +450,8 @@ func (h *AuthHandler) MobileLogin(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"matrix": matrixSession,
+		"matrix":          matrixSession,
+		"support_room_id": matrixSession.SupportRoomID,
 		"user": gin.H{
 			"sub":          profile.Sub,
 			"name":         profile.Name,

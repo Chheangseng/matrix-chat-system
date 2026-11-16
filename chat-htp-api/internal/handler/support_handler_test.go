@@ -41,8 +41,8 @@ func TestSupportHandler_GetSupportInfo_FallbackToConfig(t *testing.T) {
 		t.Fatalf("failed to parse response JSON: %v", err)
 	}
 
-	if resp["support_user_id"] != "@support:localhost" {
-		t.Errorf("expected support_user_id '@support:localhost', got %v", resp["support_user_id"])
+	if resp["support_user_id"] != cfg.GetSupportUserID() {
+		t.Errorf("expected support_user_id '%s', got %v", cfg.GetSupportUserID(), resp["support_user_id"])
 	}
 	if resp["username"] != "support" {
 		t.Errorf("expected username 'support', got %v", resp["username"])

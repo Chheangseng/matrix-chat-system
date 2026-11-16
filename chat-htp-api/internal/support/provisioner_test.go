@@ -41,7 +41,7 @@ func TestProvisioner_EnsureSupportAccount_Success(t *testing.T) {
 
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"name":        "@support:localhost",
+				"name":        "@customer-support-support:localhost",
 				"displayname": "Customer Support",
 				"admin":       false,
 			})
@@ -74,8 +74,8 @@ func TestProvisioner_EnsureSupportAccount_Success(t *testing.T) {
 		t.Fatalf("unexpected error provisioning support account: %v", err)
 	}
 
-	if user.Name != "@support:localhost" {
-		t.Errorf("expected user name @support:localhost, got %s", user.Name)
+	if user.Name != cfg.GetSupportUserID() {
+		t.Errorf("expected user name %s, got %s", cfg.GetSupportUserID(), user.Name)
 	}
 	if user.DisplayName != "Customer Support" {
 		t.Errorf("expected display name 'Customer Support', got %s", user.DisplayName)
@@ -106,7 +106,7 @@ func TestProvisioner_EnsureSupportAccount_RetryRecovery(t *testing.T) {
 			// Succeed on 3rd attempt
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"name":        "@support:localhost",
+				"name":        "@customer-support-support:localhost",
 				"displayname": "Customer Support",
 			})
 			return
@@ -137,8 +137,8 @@ func TestProvisioner_EnsureSupportAccount_RetryRecovery(t *testing.T) {
 		t.Fatalf("expected recovery after retries, got error: %v", err)
 	}
 
-	if user == nil || user.Name != "@support:localhost" {
-		t.Errorf("expected recovered support user, got %+v", user)
+	if user == nil || user.Name != cfg.GetSupportUserID() {
+		t.Errorf("expected recovered support user %s, got %+v", cfg.GetSupportUserID(), user)
 	}
 
 	if atomic.LoadInt32(&attempts) != 3 {

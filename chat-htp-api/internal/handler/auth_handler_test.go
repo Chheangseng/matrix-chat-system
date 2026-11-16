@@ -94,6 +94,33 @@ func setupOIDCAndSynapseMock(t *testing.T) (*httptest.Server, *config.Config, *o
 				"picture":      "https://example.com/pic.png",
 			})
 
+		// Matrix Create Room (POST /_matrix/client/v3/createRoom)
+		case r.Method == http.MethodPost && r.URL.Path == "/_matrix/client/v3/createRoom":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"room_id":"!mock_support_room_1:localhost"}`))
+
+		// Synapse Admin Join Room (POST /_synapse/admin/v1/join/...)
+		case r.Method == http.MethodPost && (strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/join/") || strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/rooms/")):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"room_id":"!mock_support_room_1:localhost"}`))
+
+		// Matrix Account Data (GET / PUT /_matrix/client/v3/user/.../account_data/m.direct)
+		case strings.Contains(r.URL.Path, "/account_data/m.direct"):
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{}`))
+			}
+
+		// Synapse Admin joined rooms
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/joined_rooms"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"joined_rooms":[],"total":0}`))
+
+		// Synapse Admin room members
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/rooms/") && strings.HasSuffix(r.URL.Path, "/members"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"members":[],"total":0}`))
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -101,15 +128,17 @@ func setupOIDCAndSynapseMock(t *testing.T) (*httptest.Server, *config.Config, *o
 
 	parsedURL, _ := url.Parse(mockServer.URL)
 	cfg := &config.Config{
-		SynapseURL:        parsedURL,
-		SynapseServerName: "localhost",
-		AdminUser:         "admin",
-		AdminPassword:     "secret",
-		AdminToken:        "mock_admin_token",
-		HTPOIDCIssuer:     mockServer.URL,
-		OIDCClientID:      "test_client",
-		OIDCClientSecret:  "test_secret",
-		OIDCRedirectURI:   "http://localhost:8080/api-server/auth/callback",
+		SynapseURL:         parsedURL,
+		SynapseServerName:  "localhost",
+		AdminUser:          "admin",
+		AdminPassword:      "secret",
+		AdminToken:         "mock_admin_token",
+		SupportUser:        "support",
+		SupportDisplayName: "Customer Support",
+		HTPOIDCIssuer:      mockServer.URL,
+		OIDCClientID:       "test_client",
+		OIDCClientSecret:   "test_secret",
+		OIDCRedirectURI:    "http://localhost:8080/api-server/auth/callback",
 	}
 
 	adminClient := synapse.NewAdminClient(cfg)
@@ -267,5 +296,155 @@ func TestAuthHandler_MobileLogin(t *testing.T) {
 	matrix := res["matrix"].(map[string]interface{})
 	if matrix["access_token"] != "syt_mock_matrix_token_12345" {
 		t.Errorf("expected valid matrix token from mobile login, got %v", matrix["access_token"])
+	}
+}
+
+func TestAuthHandler_CustomerSupportRoom_CreationAndDedup(t *testing.T) {
+	var createRoomCalls int
+	var storedDirectData = make(map[string]map[string][]string)
+
+	var mockServer *httptest.Server
+	mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/_matrix/client/v3/login":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"access_token":"mock_admin_token"}`))
+
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v2/users/"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"name":"@htp_testuser:localhost","displayname":"HTP Test User"}`))
+
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/login"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"access_token":"syt_user_token","user_id":"@htp_testuser:localhost","home_server":"localhost"}`))
+
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth2/token":
+			payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"testuser","name":"HTP Test User"}`))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"access_token": "oidc_token",
+				"id_token":     fmt.Sprintf("header.%s.sig", payload),
+				"token_type":   "Bearer",
+			})
+
+		case r.Method == http.MethodGet && r.URL.Path == "/oauth2/userinfo":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"sub":  "testuser",
+				"name": "HTP Test User",
+			})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/_matrix/client/v3/createRoom":
+			createRoomCalls++
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["is_direct"] != true {
+				t.Errorf("expected is_direct to be true")
+			}
+			if body["preset"] != "trusted_private_chat" {
+				t.Errorf("expected preset trusted_private_chat, got %v", body["preset"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"room_id":"!mock_support_dm_room:localhost"}`))
+
+		case r.Method == http.MethodPost && (strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/join/") || strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/rooms/")):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"room_id":"!mock_support_dm_room:localhost"}`))
+
+		case strings.Contains(r.URL.Path, "/account_data/m.direct"):
+			userPart := r.URL.Path
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusOK)
+				data := storedDirectData[userPart]
+				if data == nil {
+					data = make(map[string][]string)
+				}
+				_ = json.NewEncoder(w).Encode(data)
+			} else if r.Method == http.MethodPut {
+				var data map[string][]string
+				_ = json.NewDecoder(r.Body).Decode(&data)
+				storedDirectData[userPart] = data
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{}`))
+			}
+
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/joined_rooms"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"joined_rooms":[],"total":0}`))
+
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v1/rooms/") && strings.HasSuffix(r.URL.Path, "/members"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"members":[],"total":0}`))
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockServer.Close()
+
+	parsedURL, _ := url.Parse(mockServer.URL)
+	cfg := &config.Config{
+		SynapseURL:         parsedURL,
+		SynapseServerName:  "localhost",
+		AdminUser:          "admin",
+		AdminPassword:      "secret",
+		AdminToken:         "mock_admin_token",
+		SupportUser:        "support",
+		SupportDisplayName: "Customer Support",
+		HTPOIDCIssuer:      mockServer.URL,
+		OIDCClientID:       "test_client",
+		OIDCClientSecret:   "test_secret",
+		OIDCRedirectURI:    "http://localhost:8080/api-server/auth/callback",
+	}
+
+	adminClient := synapse.NewAdminClient(cfg)
+	oidcSvc := oidc.NewService(cfg)
+	oidcSvc.SetHTTPClient(mockServer.Client())
+
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
+	router := setupAuthRouter(authHandler)
+
+	// --- 1st Login: Must create the 1-on-1 direct message room ---
+	reqBody1, _ := json.Marshal(map[string]string{"code": "code_1", "state": "state_1"})
+	req1, _ := http.NewRequest(http.MethodPost, "/api-server/auth/exchange", bytes.NewReader(reqBody1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first exchange failed: %d, body: %s", w1.Code, w1.Body.String())
+	}
+
+	var res1 map[string]interface{}
+	_ = json.Unmarshal(w1.Body.Bytes(), &res1)
+	if res1["support_room_id"] != "!mock_support_dm_room:localhost" {
+		t.Errorf("expected support_room_id '!mock_support_dm_room:localhost', got %v", res1["support_room_id"])
+	}
+
+	if createRoomCalls != 1 {
+		t.Fatalf("expected 1 createRoom call, got %d", createRoomCalls)
+	}
+
+	// --- 2nd Login for same user: Must reuse existing room without calling createRoom again ---
+	reqBody2, _ := json.Marshal(map[string]string{"code": "code_2", "state": "state_2"})
+	req2, _ := http.NewRequest(http.MethodPost, "/api-server/auth/exchange", bytes.NewReader(reqBody2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second exchange failed: %d, body: %s", w2.Code, w2.Body.String())
+	}
+
+	var res2 map[string]interface{}
+	_ = json.Unmarshal(w2.Body.Bytes(), &res2)
+	if res2["support_room_id"] != "!mock_support_dm_room:localhost" {
+		t.Errorf("expected reused support_room_id '!mock_support_dm_room:localhost', got %v", res2["support_room_id"])
+	}
+
+	if createRoomCalls != 1 {
+		t.Errorf("expected createRoom to still be called only once (idempotent), got %d calls", createRoomCalls)
 	}
 }

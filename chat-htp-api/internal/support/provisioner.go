@@ -58,7 +58,7 @@ func (p *Provisioner) EnsureSupportAccount(ctx context.Context) (*synapse.Synaps
 		default:
 		}
 
-		user, err := p.adminClient.CreateOrUpdateUser(ctx, "", p.cfg.SupportUser, payload)
+		user, err := p.adminClient.CreateOrUpdateUser(ctx, "", supportUserID, payload)
 		if err == nil {
 			log.Printf("[INFO] Customer support account ready in Matrix: %s (\"%s\")", supportUserID, p.cfg.SupportDisplayName)
 			if p.db != nil {
