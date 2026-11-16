@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 
@@ -46,10 +45,8 @@ type Config struct {
 
 // LoadConfig loads configuration from .env file and environment variables
 func LoadConfig() (*Config, error) {
-	// Attempt to load .env file if it exists, ignore error if missing
-	if err := godotenv.Load(); err != nil {
-		log.Println("[INFO] No .env file found or error reading, using environment variables")
-	}
+	// Attempt to load .env file if it exists, checking both current directory and chat-htp-api/.env
+	_ = godotenv.Load(".env", "chat-htp-api/.env")
 
 	port := getEnv("APP_PORT", "8080")
 	env := getEnv("APP_ENV", "development")

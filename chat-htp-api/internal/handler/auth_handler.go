@@ -47,7 +47,7 @@ type ExchangeRequest struct {
 
 // MobileLoginRequest represents the payload for POST /api-server/auth/mobile-login
 type MobileLoginRequest struct {
-	Token string `json:"token"`
+	Token string `json:"htp_token"`
 }
 
 // SupportLoginRequest represents credentials for customer support staff login
