@@ -583,3 +583,57 @@ func (c *AdminClient) AddUserDirectRoom(ctx context.Context, token, rawUserID, t
 	directData[fullTargetID] = append(rooms, roomID)
 	return c.SetUserDirectRooms(ctx, token, rawUserID, directData)
 }
+
+// LoginWithPassword authenticates an arbitrary user via Matrix password login (POST /_matrix/client/v3/login)
+func (c *AdminClient) LoginWithPassword(ctx context.Context, rawUserID, password string) (*MatrixLoginResponse, error) {
+	fullUserID := c.FormatUserID(rawUserID)
+
+	loginPayload := map[string]interface{}{
+		"type": "m.login.password",
+		"identifier": map[string]string{
+			"type": "m.id.user",
+			"user": fullUserID,
+		},
+		"password": password,
+	}
+
+	jsonBytes, err := json.Marshal(loginPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	loginURL := fmt.Sprintf("%s/_matrix/client/v3/login", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Synapse login: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = resp.StatusCode
+		_ = json.Unmarshal(bodyBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(bodyBytes)
+		}
+		return nil, &apiErr
+	}
+
+	var loginResp MatrixLoginResponse
+	if err := json.Unmarshal(bodyBytes, &loginResp); err != nil {
+		return nil, fmt.Errorf("failed to decode login response: %w", err)
+	}
+
+	return &loginResp, nil
+}

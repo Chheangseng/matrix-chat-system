@@ -157,6 +157,7 @@ func setupAuthRouter(authHandler *handler.AuthHandler) *gin.Engine {
 		api.POST("/exchange", authHandler.Exchange)
 		api.POST("/pre-auth", authHandler.PreAuth)
 		api.POST("/mobile-login", authHandler.MobileLogin)
+		api.POST("/support-login", authHandler.SupportLogin)
 	}
 	return r
 }
@@ -447,4 +448,53 @@ func TestAuthHandler_CustomerSupportRoom_CreationAndDedup(t *testing.T) {
 	if createRoomCalls != 1 {
 		t.Errorf("expected createRoom to still be called only once (idempotent), got %d calls", createRoomCalls)
 	}
+}
+
+func TestAuthHandler_SupportLogin(t *testing.T) {
+	mockServer, cfg, oidcSvc, adminClient := setupOIDCAndSynapseMock(t)
+	defer mockServer.Close()
+
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
+	router := setupAuthRouter(authHandler)
+
+	t.Run("Authorized support staff login succeeds", func(t *testing.T) {
+		payload, _ := json.Marshal(map[string]string{
+			"username": "support",
+			"password": "support_password_123",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api-server/auth/support-login", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var res map[string]interface{}
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		matrix, ok := res["matrix"].(map[string]interface{})
+		if !ok || matrix["access_token"] == "" {
+			t.Errorf("expected matrix access token in response, got %+v", res)
+		}
+		user, ok := res["user"].(map[string]interface{})
+		if !ok || user["role"] != "support_agent" {
+			t.Errorf("expected user role support_agent, got %+v", user)
+		}
+	})
+
+	t.Run("Unauthorized regular user is rejected with 403 Forbidden", func(t *testing.T) {
+		payload, _ := json.Marshal(map[string]string{
+			"username": "regular_customer",
+			"password": "customer_password",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api-server/auth/support-login", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden, got %d: %s", w.Code, w.Body.String())
+		}
+	})
 }

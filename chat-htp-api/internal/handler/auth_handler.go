@@ -50,6 +50,12 @@ type MobileLoginRequest struct {
 	Token string `json:"token"`
 }
 
+// SupportLoginRequest represents credentials for customer support staff login
+type SupportLoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
 // provisionMatrixUserAndLogin provisions or updates the user profile in Synapse and logs them in
 // using deterministic credentials derived from the OIDC subject ID.
 func (h *AuthHandler) provisionMatrixUserAndLogin(ctx context.Context, profile *oidc.UserProfile) (*synapse.MatrixLoginResponse, error) {
@@ -281,6 +287,13 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	// If browser popup or redirect flow expects HTML
 	accept := c.GetHeader("Accept")
 	if strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json") {
+		clientRedirectURL := fmt.Sprintf("%s?auth_token=%s&room_id=%s&user_id=%s",
+			h.cfg.ClientUIURL,
+			url.QueryEscape(matrixSession.AccessToken),
+			url.QueryEscape(matrixSession.SupportRoomID),
+			url.QueryEscape(matrixSession.UserID),
+		)
+
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -292,21 +305,25 @@ func (h *AuthHandler) Callback(c *gin.Context) {
         .card { background: white; padding: 32px 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center; max-width: 400px; }
         h1 { font-size: 20px; color: #111827; margin-bottom: 8px; }
         p { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+        .btn { display: inline-block; padding: 10px 20px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; }
     </style>
 </head>
 <body>
     <div class="card">
         <h1>Authentication Successful</h1>
-        <p>You have signed in as <strong>%s</strong>. You may close this window and return to the application.</p>
+        <p>You have signed in as <strong>%s</strong>. Redirecting to Customer Support chat...</p>
+        <a class="btn" href="%s">Open Customer Support</a>
     </div>
     <script>
         if (window.opener) {
             window.opener.postMessage({ type: 'matrix_oidc_success', data: %s }, '*');
             setTimeout(function() { window.close(); }, 1200);
+        } else {
+            window.location.href = %q;
         }
     </script>
 </body>
-</html>`, templateEscape(profile.Name), mustJSON(responseData))
+</html>`, templateEscape(profile.Name), clientRedirectURL, mustJSON(responseData), clientRedirectURL)
 		c.String(http.StatusOK, html)
 		return
 	}
@@ -357,6 +374,70 @@ func (h *AuthHandler) Exchange(c *gin.Context) {
 		"oidc": gin.H{
 			"access_token": profile.AccessToken,
 			"id_token":     profile.IDToken,
+		},
+	})
+}
+
+// SupportLogin handles POST /api-server/auth/support-login
+// Authenticates support staff with username and password, strictly verifying that
+// the user is a designated customer support account, and returns Matrix session credentials.
+func (h *AuthHandler) SupportLogin(c *gin.Context) {
+	var req SupportLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errcode": "M_BAD_JSON",
+			"error":   "Missing or invalid required fields: username and password",
+		})
+		return
+	}
+
+	trimmedUser := strings.TrimSpace(req.Username)
+	supportUserID := h.cfg.GetSupportUserID()
+
+	// Verify authorization: must match configured support user or registered customer support record
+	isAuthorized := false
+	if trimmedUser == h.cfg.SupportUser || trimmedUser == supportUserID ||
+		h.adminClient.FormatUserID(trimmedUser) == supportUserID {
+		isAuthorized = true
+	} else if h.db != nil {
+		var cs models.CustomerSupport
+		if err := h.db.WithContext(c.Request.Context()).
+			Where("username = ? OR matrix_user_id = ?", trimmedUser, h.adminClient.FormatUserID(trimmedUser)).
+			First(&cs).Error; err == nil && cs.Status == "active" {
+			isAuthorized = true
+		}
+	}
+
+	if !isAuthorized {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errcode": "M_FORBIDDEN",
+			"error":   "Account is not authorized for customer support access",
+		})
+		return
+	}
+
+	loginTarget := trimmedUser
+	if !strings.HasPrefix(loginTarget, "@") {
+		loginTarget = supportUserID
+	}
+
+	session, err := h.adminClient.LoginWithPassword(c.Request.Context(), loginTarget, req.Password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errcode": "M_UNAUTHORIZED",
+			"error":   fmt.Sprintf("Invalid username or password: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"matrix": session,
+		"user": gin.H{
+			"username":     h.cfg.SupportUser,
+			"user_id":      session.UserID,
+			"display_name": h.cfg.SupportDisplayName,
+			"avatar_url":   h.cfg.SupportAvatarURL,
+			"role":         "support_agent",
 		},
 	})
 }

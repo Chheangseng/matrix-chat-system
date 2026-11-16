@@ -39,6 +39,9 @@ type Config struct {
 	SupportDisplayName string
 	SupportAvatarURL   string
 	SupportAdmin       bool
+
+	// Frontend Client UI URL
+	ClientUIURL string
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -74,6 +77,7 @@ func LoadConfig() (*Config, error) {
 	supportDisplayName := getEnv("SUPPORT_DISPLAY_NAME", "Customer Support")
 	supportAvatarURL := getEnv("SUPPORT_AVATAR_URL", "")
 	supportAdmin := getEnv("SUPPORT_ADMIN", "false") == "true"
+	clientUIURL := getEnv("CLIENT_UI_URL", "http://localhost:5001")
 
 	parsedURL, err := url.Parse(rawSynapseURL)
 	if err != nil {
@@ -105,6 +109,7 @@ func LoadConfig() (*Config, error) {
 		SupportDisplayName: supportDisplayName,
 		SupportAvatarURL:   supportAvatarURL,
 		SupportAdmin:       supportAdmin,
+		ClientUIURL:        clientUIURL,
 	}, nil
 }
 

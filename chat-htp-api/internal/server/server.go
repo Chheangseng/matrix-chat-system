@@ -128,6 +128,7 @@ func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, aut
 			auth.POST("/exchange", authHandler.Exchange)
 			auth.POST("/pre-auth", authHandler.PreAuth)
 			auth.POST("/mobile-login", authHandler.MobileLogin)
+			auth.POST("/support-login", authHandler.SupportLogin)
 		}
 
 		// User Management endpoints (Synapse User Admin API)
