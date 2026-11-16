@@ -18,6 +18,10 @@ type Config struct {
 	AdminUser         string
 	AdminPassword     string
 	AdminToken        string
+	HTPOIDCIssuer     string
+	OIDCClientID      string
+	OIDCClientSecret  string
+	OIDCRedirectURI   string
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -35,6 +39,10 @@ func LoadConfig() (*Config, error) {
 	adminUser := getEnv("SYNAPSE_ADMIN_USER", "admin")
 	adminPassword := getEnv("SYNAPSE_ADMIN_PASSWORD", "admin_password_123")
 	adminToken := getEnv("SYNAPSE_ADMIN_TOKEN", "")
+	oidcIssuer := getEnv("HTP_OIDC_ISSUER", "http://localhost:5054")
+	oidcClientID := getEnv("OIDC_CLIENT_ID", "")
+	oidcClientSecret := getEnv("OIDC_CLIENT_SECRET", "")
+	oidcRedirectURI := getEnv("OIDC_REDIRECT_URI", "http://localhost:8080/api-server/auth/callback")
 
 	parsedURL, err := url.Parse(rawSynapseURL)
 	if err != nil {
@@ -50,6 +58,10 @@ func LoadConfig() (*Config, error) {
 		AdminUser:         adminUser,
 		AdminPassword:     adminPassword,
 		AdminToken:        adminToken,
+		HTPOIDCIssuer:     oidcIssuer,
+		OIDCClientID:      oidcClientID,
+		OIDCClientSecret:  oidcClientSecret,
+		OIDCRedirectURI:   oidcRedirectURI,
 	}, nil
 }
 

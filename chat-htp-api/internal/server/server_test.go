@@ -65,6 +65,14 @@ func TestServerRouting(t *testing.T) {
 			expectedBodyField: "version",
 		},
 		{
+			name:              "Custom API auth login (JSON format)",
+			path:              "/api-server/auth/login?format=json",
+			method:            http.MethodGet,
+			expectedStatus:    http.StatusOK,
+			shouldHitBackend:  false,
+			expectedBodyField: "authorize_url",
+		},
+		{
 			name:              "Well-known client discovery served by gateway to hide synapse backend",
 			path:              "/.well-known/matrix/client",
 			method:            http.MethodGet,

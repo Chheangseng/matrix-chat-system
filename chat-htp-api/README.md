@@ -98,7 +98,47 @@ go build -o bin/server.exe ./cmd/server
 
 ## Endpoints
 
-### 1. Custom User Management APIs (`/api-server/users`)
+### 1. OIDC Single Sign-On Authentication (`/api-server/auth`)
+
+Integrates with HTP OIDC Issuer (supporting PKCE S256, UserInfo discovery, and mobile app seamless pre-auth) and automatically provisions Matrix users & sessions:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api-server/auth/login` | **Initiate Login**: Redirects browser to OIDC authorize URL or returns `{authorize_url, state}` if `?format=json` |
+| `GET` | `/api-server/auth/callback` | **OIDC Callback**: Handles code exchange, auto-provisions Synapse account, and returns Matrix session + user profile |
+| `POST` | `/api-server/auth/exchange` | **Direct Exchange**: Receives `{code, state}`, completes token exchange & Matrix provisioning |
+| `POST` | `/api-server/auth/mobile-login` | **Seamless Mobile SSO**: Accepts existing HTP Bearer token, auto-completes pre-auth, and directly returns Matrix access token |
+| `POST` | `/api-server/auth/pre-auth` | **Mobile Pre-Auth**: Performs pre-auth request and returns `{challenge, redirect_to}` |
+
+#### Mobile Single Sign-On Example (`POST /api-server/auth/mobile-login`):
+Headers: `Authorization: Bearer <htp_user_bearer_token>` (or JSON body: `{"token": "<token>"}`)
+
+**Response (`200 OK`)**:
+```json
+{
+  "matrix": {
+    "access_token": "syt_...",
+    "device_id": "...",
+    "home_server": "localhost",
+    "user_id": "@htp_user123:localhost"
+  },
+  "user": {
+    "sub": "user123",
+    "name": "Nguyen Van A",
+    "nickname": "anguyen",
+    "phone_number": "+84912345678",
+    "picture": "https://..."
+  },
+  "oidc": {
+    "access_token": "...",
+    "id_token": "..."
+  }
+}
+```
+
+---
+
+### 2. Custom User Management APIs (`/api-server/users`)
 
 Powered by the [Synapse User Admin API](https://matrix-org.github.io/synapse/latest/admin_api/user_admin_api.html):
 

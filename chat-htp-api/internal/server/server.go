@@ -6,6 +6,7 @@ import (
 	"chat-htp-api/internal/config"
 	"chat-htp-api/internal/handler"
 	"chat-htp-api/internal/middleware"
+	"chat-htp-api/internal/oidc"
 	"chat-htp-api/internal/synapse"
 
 	"github.com/gin-gonic/gin"
@@ -33,9 +34,11 @@ func New(cfg *config.Config) *Server {
 	// Synapse Admin Client & Handlers
 	adminClient := synapse.NewAdminClient(cfg)
 	userHandler := handler.NewUserHandler(adminClient)
+	oidcService := oidc.NewService(cfg)
+	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg)
 
 	// Setup custom /api-server routes
-	registerAPIRoutes(engine, userHandler)
+	registerAPIRoutes(engine, userHandler, authHandler)
 
 	// Well-known Matrix client discovery: advertise the gateway address, never the internal Synapse address
 	engine.GET("/.well-known/matrix/client", func(c *gin.Context) {
@@ -65,7 +68,7 @@ func New(cfg *config.Config) *Server {
 }
 
 // registerAPIRoutes sets up endpoints reserved for the custom backend API under /api-server
-func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler) {
+func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler) {
 	api := engine.Group("/api-server")
 	{
 		// Health check endpoint
@@ -83,6 +86,16 @@ func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler) {
 				"description": "Custom Chat API Gateway with Matrix Synapse Proxy",
 			})
 		})
+
+		// Authentication & OIDC endpoints
+		auth := api.Group("/auth")
+		{
+			auth.GET("/login", authHandler.Login)
+			auth.GET("/callback", authHandler.Callback)
+			auth.POST("/exchange", authHandler.Exchange)
+			auth.POST("/pre-auth", authHandler.PreAuth)
+			auth.POST("/mobile-login", authHandler.MobileLogin)
+		}
 
 		// User Management endpoints (Synapse User Admin API)
 		users := api.Group("/users")

@@ -336,3 +336,39 @@ func (c *AdminClient) ListUsers(ctx context.Context, token, from string, limit i
 	}
 	return &listResp, nil
 }
+
+// MatrixLoginResponse represents the session response returned when logging in as a user
+type MatrixLoginResponse struct {
+	AccessToken string `json:"access_token"`
+	DeviceID    string `json:"device_id"`
+	HomeServer  string `json:"home_server"`
+	UserID      string `json:"user_id"`
+}
+
+// LoginAsUser logs in as a specified user using the Synapse Admin API (POST /_synapse/admin/v1/users/<user_id>/login)
+// and returns an access token and session details without requiring the user's password.
+func (c *AdminClient) LoginAsUser(ctx context.Context, token, rawUserID string) (*MatrixLoginResponse, error) {
+	fullUserID := c.FormatUserID(rawUserID)
+	path := fmt.Sprintf("/_synapse/admin/v1/users/%s/login", url.PathEscape(fullUserID))
+
+	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodPost, path, map[string]interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode != http.StatusOK {
+		var apiErr AdminAPIError
+		apiErr.StatusCode = statusCode
+		_ = json.Unmarshal(respBytes, &apiErr)
+		if apiErr.ErrorMsg == "" {
+			apiErr.ErrorMsg = string(respBytes)
+		}
+		return nil, &apiErr
+	}
+
+	var loginResp MatrixLoginResponse
+	if err := json.Unmarshal(respBytes, &loginResp); err != nil {
+		return nil, err
+	}
+	return &loginResp, nil
+}
