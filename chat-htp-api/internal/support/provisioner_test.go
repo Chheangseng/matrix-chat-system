@@ -66,7 +66,7 @@ func TestProvisioner_EnsureSupportAccount_Success(t *testing.T) {
 	}
 
 	adminClient := synapse.NewAdminClient(cfg)
-	provisioner := support.NewProvisioner(adminClient, cfg)
+	provisioner := support.NewProvisioner(adminClient, cfg, nil)
 	provisioner.SetRetryPolicy(3, 10*time.Millisecond)
 
 	user, err := provisioner.EnsureSupportAccount(context.Background())
@@ -129,7 +129,7 @@ func TestProvisioner_EnsureSupportAccount_RetryRecovery(t *testing.T) {
 	}
 
 	adminClient := synapse.NewAdminClient(cfg)
-	provisioner := support.NewProvisioner(adminClient, cfg)
+	provisioner := support.NewProvisioner(adminClient, cfg, nil)
 	provisioner.SetRetryPolicy(5, 10*time.Millisecond)
 
 	user, err := provisioner.EnsureSupportAccount(context.Background())
@@ -163,7 +163,7 @@ func TestProvisioner_EnsureSupportAccount_ExhaustedRetries(t *testing.T) {
 	}
 
 	adminClient := synapse.NewAdminClient(cfg)
-	provisioner := support.NewProvisioner(adminClient, cfg)
+	provisioner := support.NewProvisioner(adminClient, cfg, nil)
 	provisioner.SetRetryPolicy(2, 5*time.Millisecond)
 
 	_, err := provisioner.EnsureSupportAccount(context.Background())

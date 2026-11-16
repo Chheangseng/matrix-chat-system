@@ -41,8 +41,8 @@ func New(cfg *config.Config, db *gorm.DB) *Server {
 	userHandler := handler.NewUserHandler(adminClient, db)
 	oidcService := oidc.NewService(cfg)
 	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg, db)
-	supportHandler := handler.NewSupportHandler(cfg)
-	supportProvisioner := support.NewProvisioner(adminClient, cfg)
+	supportHandler := handler.NewSupportHandler(cfg, db)
+	supportProvisioner := support.NewProvisioner(adminClient, cfg, db)
 
 	// Setup custom /api-server routes
 	registerAPIRoutes(engine, userHandler, authHandler, supportHandler, cfg, db)

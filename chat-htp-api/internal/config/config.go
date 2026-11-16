@@ -110,7 +110,7 @@ func LoadConfig() (*Config, error) {
 
 // GetSupportUserID returns the formatted Matrix user ID for the customer support account
 func (c *Config) GetSupportUserID() string {
-	return fmt.Sprintf("@%s:%s", c.SupportUser, c.SynapseServerName)
+	return fmt.Sprintf("@customer-support-%s:%s", c.SupportUser, c.SynapseServerName)
 }
 
 // GetAPIDBDSN returns the connection string for GORM PostgreSQL

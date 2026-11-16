@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chat-htp-api/internal/config"
+	"chat-htp-api/internal/models"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -64,6 +65,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
-	// Entity models are reserved for future API data requirements
+	if err := db.AutoMigrate(&models.CustomerSupport{}); err != nil {
+		return fmt.Errorf("failed to auto-migrate CustomerSupport entity: %w", err)
+	}
+	log.Println("[INFO] Database schema migration completed for models")
 	return nil
 }
