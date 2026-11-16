@@ -10,16 +10,18 @@ import (
 	"chat-htp-api/internal/synapse"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-// Server wraps the Gin engine and application configuration
+// Server wraps the Gin engine, application configuration, and database connection
 type Server struct {
 	Engine *gin.Engine
 	Config *config.Config
+	DB     *gorm.DB
 }
 
 // New creates and configures a new Server instance
-func New(cfg *config.Config) *Server {
+func New(cfg *config.Config, db *gorm.DB) *Server {
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -33,12 +35,12 @@ func New(cfg *config.Config) *Server {
 
 	// Synapse Admin Client & Handlers
 	adminClient := synapse.NewAdminClient(cfg)
-	userHandler := handler.NewUserHandler(adminClient)
+	userHandler := handler.NewUserHandler(adminClient, db)
 	oidcService := oidc.NewService(cfg)
-	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg)
+	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg, db)
 
 	// Setup custom /api-server routes
-	registerAPIRoutes(engine, userHandler, authHandler)
+	registerAPIRoutes(engine, userHandler, authHandler, db)
 
 	// Well-known Matrix client discovery: advertise the gateway address, never the internal Synapse address
 	engine.GET("/.well-known/matrix/client", func(c *gin.Context) {
@@ -64,18 +66,27 @@ func New(cfg *config.Config) *Server {
 	return &Server{
 		Engine: engine,
 		Config: cfg,
+		DB:     db,
 	}
 }
 
 // registerAPIRoutes sets up endpoints reserved for the custom backend API under /api-server
-func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler) {
+func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler, db *gorm.DB) {
 	api := engine.Group("/api-server")
 	{
 		// Health check endpoint
 		api.GET("/healthz", func(c *gin.Context) {
+			dbStatus := "connected"
+			if db == nil {
+				dbStatus = "disabled"
+			} else if sqlDB, err := db.DB(); err != nil || sqlDB.Ping() != nil {
+				dbStatus = "disconnected"
+			}
+
 			c.JSON(http.StatusOK, gin.H{
-				"status":  "ok",
-				"service": "chat-htp-api",
+				"status":   "ok",
+				"service":  "chat-htp-api",
+				"database": dbStatus,
 			})
 		})
 

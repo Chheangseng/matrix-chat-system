@@ -9,17 +9,20 @@ import (
 	"chat-htp-api/internal/synapse"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // UserHandler handles user management endpoints
 type UserHandler struct {
 	adminClient *synapse.AdminClient
+	db          *gorm.DB
 }
 
 // NewUserHandler creates a new UserHandler instance
-func NewUserHandler(adminClient *synapse.AdminClient) *UserHandler {
+func NewUserHandler(adminClient *synapse.AdminClient, db *gorm.DB) *UserHandler {
 	return &UserHandler{
 		adminClient: adminClient,
+		db:          db,
 	}
 }
 

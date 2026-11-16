@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"chat-htp-api/internal/config"
+	"chat-htp-api/internal/database"
 	"chat-htp-api/internal/server"
+
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -20,7 +23,21 @@ func main() {
 		log.Fatalf("[FATAL] Failed to load configuration: %v\n", err)
 	}
 
-	srvInstance := server.New(cfg)
+	// Initialize API PostgreSQL Database (GORM)
+	var db *gorm.DB
+	db, err = database.Connect(cfg)
+	if err != nil {
+		if cfg.Environment == "production" {
+			log.Fatalf("[FATAL] Failed to connect to API PostgreSQL database: %v\n", err)
+		}
+		log.Printf("[WARN] Failed to connect to API PostgreSQL database: %v. Running in degraded mode without database.", err)
+	} else {
+		if err := database.AutoMigrate(db); err != nil {
+			log.Fatalf("[FATAL] Database auto-migration failed: %v\n", err)
+		}
+	}
+
+	srvInstance := server.New(cfg, db)
 
 	httpServer := &http.Server{
 		Addr:    ":" + cfg.Port,

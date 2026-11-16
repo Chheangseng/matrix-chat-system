@@ -54,8 +54,31 @@ services:
       - matrix-net
     restart: "no"
 
+  # Dedicated PostgreSQL Database for chat-htp-api (GORM)
+  api-db:
+    image: postgres:16-alpine
+    container_name: chat-api-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${API_DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${API_DB_USER:-chat_api}
+      POSTGRES_PASSWORD: ${API_DB_PASSWORD:-chat_api_secret}
+      POSTGRES_DB: ${API_DB_NAME:-chat_api_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - chat-api-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${API_DB_USER:-chat_api} -d ${API_DB_NAME:-chat_api_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - matrix-net
+
 volumes:
   synapse-db-data:
+  chat-api-db-data:
 
 networks:
   matrix-net:

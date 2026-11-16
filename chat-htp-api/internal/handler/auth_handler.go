@@ -2,12 +2,11 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"chat-htp-api/internal/config"
@@ -15,21 +14,26 @@ import (
 	"chat-htp-api/internal/synapse"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+var nonAlphaNumDash = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 // AuthHandler handles OIDC authentication and Matrix user provisioning
 type AuthHandler struct {
 	oidcService *oidc.Service
 	adminClient *synapse.AdminClient
 	cfg         *config.Config
+	db          *gorm.DB
 }
 
 // NewAuthHandler creates a new AuthHandler instance
-func NewAuthHandler(oidcService *oidc.Service, adminClient *synapse.AdminClient, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(oidcService *oidc.Service, adminClient *synapse.AdminClient, cfg *config.Config, db *gorm.DB) *AuthHandler {
 	return &AuthHandler{
 		oidcService: oidcService,
 		adminClient: adminClient,
 		cfg:         cfg,
+		db:          db,
 	}
 }
 
@@ -44,69 +48,35 @@ type MobileLoginRequest struct {
 	Token string `json:"token"`
 }
 
-// sanitizeMatrixLocalpart cleans the subject/username string into a Matrix-compliant localpart
-func sanitizeMatrixLocalpart(sub string) string {
-	sub = strings.ToLower(strings.TrimSpace(sub))
-	var b strings.Builder
-	for _, r := range sub {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '=' || r == '-' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('_')
-		}
-	}
-	cleaned := strings.Trim(b.String(), "_")
-	if cleaned == "" {
-		cleaned = "user"
-	}
-	return "htp_" + cleaned
-}
-
-// randomSecret generates a random password string for initial user provisioning
-func randomSecret() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 // provisionMatrixUserAndLogin provisions or updates the user profile in Synapse and logs them in
+// using deterministic credentials derived from the OIDC subject ID.
 func (h *AuthHandler) provisionMatrixUserAndLogin(ctx context.Context, profile *oidc.UserProfile) (*synapse.MatrixLoginResponse, error) {
-	sub := profile.Sub
-	if sub == "" {
-		if profile.Nickname != "" {
-			sub = profile.Nickname
-		} else if profile.PhoneNumber != "" {
-			sub = profile.PhoneNumber
-		} else {
-			sub = "user"
-		}
-	}
+	rawSub := nonAlphaNumDash.ReplaceAllString(profile.Sub, "_")
+	username := fmt.Sprintf("htp_%s", rawSub)
+	deterministicPassword := fmt.Sprintf("Pass_%s_Secret987!", rawSub)
 
-	localpart := sanitizeMatrixLocalpart(sub)
-
-	// 1. Create or update user in Synapse
 	displayName := profile.Name
 	if displayName == "" {
 		displayName = profile.Nickname
 	}
 	if displayName == "" {
-		displayName = "HTP User " + sub
+		displayName = "HTP User " + rawSub
 	}
 
 	createPayload := synapse.CreateUserPayload{
-		Password:    randomSecret(),
+		Password:    deterministicPassword,
 		DisplayName: displayName,
 		AvatarURL:   profile.Picture,
 	}
 
-	// Create or update user (AdminClient formats ID as @localpart:server_name)
-	_, err := h.adminClient.CreateOrUpdateUser(ctx, "", localpart, createPayload)
+	// 1. Create or update user in Synapse
+	_, err := h.adminClient.CreateOrUpdateUser(ctx, "", username, createPayload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to provision user in Synapse: %w", err)
 	}
 
 	// 2. Obtain Matrix access token via Synapse Admin login
-	matrixSession, err := h.adminClient.LoginAsUser(ctx, "", localpart)
+	matrixSession, err := h.adminClient.LoginAsUser(ctx, "", username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate Matrix session for user: %w", err)
 	}
@@ -115,9 +85,11 @@ func (h *AuthHandler) provisionMatrixUserAndLogin(ctx context.Context, profile *
 }
 
 // Login handles GET /api-server/auth/login
-// Redirects the client to HTP OIDC authorize endpoint or returns the URL as JSON
+// Redirects the client to HTP OIDC authorize endpoint or returns the URL as JSON.
+// Only scopes "openid", "profile", and "phone" are allowed.
 func (h *AuthHandler) Login(c *gin.Context) {
-	authReq, err := h.oidcService.CreateAuthorizeRequest()
+	requestedScope := c.Query("scope")
+	authReq, err := h.oidcService.CreateAuthorizeRequest(requestedScope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errcode": "M_OIDC_ERROR",

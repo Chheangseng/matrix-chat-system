@@ -94,7 +94,7 @@ func TestUserHandler_CreateUser(t *testing.T) {
 	mockServer, adminClient := setupMockSynapse(t)
 	defer mockServer.Close()
 
-	userHandler := handler.NewUserHandler(adminClient)
+	userHandler := handler.NewUserHandler(adminClient, nil)
 	router := gin.New()
 	router.POST("/api-server/users", userHandler.CreateUser)
 
@@ -137,7 +137,7 @@ func TestUserHandler_GetUser(t *testing.T) {
 	mockServer, adminClient := setupMockSynapse(t)
 	defer mockServer.Close()
 
-	userHandler := handler.NewUserHandler(adminClient)
+	userHandler := handler.NewUserHandler(adminClient, nil)
 	router := gin.New()
 	router.GET("/api-server/users/:id", userHandler.GetUser)
 
@@ -176,7 +176,7 @@ func TestUserHandler_ListUsers(t *testing.T) {
 	mockServer, adminClient := setupMockSynapse(t)
 	defer mockServer.Close()
 
-	userHandler := handler.NewUserHandler(adminClient)
+	userHandler := handler.NewUserHandler(adminClient, nil)
 	router := gin.New()
 	router.GET("/api-server/users", userHandler.ListUsers)
 

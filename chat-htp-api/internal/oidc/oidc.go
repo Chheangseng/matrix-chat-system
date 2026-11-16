@@ -109,6 +109,49 @@ type MobilePreAuthResult struct {
 	Code       string `json:"code,omitempty"`
 }
 
+// AllowedScopes defines the strict whitelist of permitted OIDC scopes
+var AllowedScopes = []string{"openid", "profile", "phone"}
+
+var allowedScopesMap = map[string]bool{
+	"openid":  true,
+	"profile": true,
+	"phone":   true,
+}
+
+// FilterAllowedScopes enforces that only "openid", "profile", and "phone" are permitted.
+// Any other requested scopes are strictly stripped out.
+// If the input is empty or contains no allowed scopes, it defaults to "openid profile phone".
+func FilterAllowedScopes(requested string) string {
+	if strings.TrimSpace(requested) == "" {
+		return "openid profile phone"
+	}
+
+	tokens := strings.FieldsFunc(requested, func(r rune) bool {
+		return r == ' ' || r == ','
+	})
+
+	var filtered []string
+	seen := make(map[string]bool)
+	for _, tok := range tokens {
+		t := strings.TrimSpace(strings.ToLower(tok))
+		if allowedScopesMap[t] && !seen[t] {
+			seen[t] = true
+			filtered = append(filtered, t)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return "openid profile phone"
+	}
+
+	// Ensure openid is always present as required by OIDC spec
+	if !seen["openid"] {
+		filtered = append([]string{"openid"}, filtered...)
+	}
+
+	return strings.Join(filtered, " ")
+}
+
 // Service provides OIDC authentication flows matching HTP OIDC Issuer
 type Service struct {
 	issuer       string
@@ -137,7 +180,7 @@ func NewService(cfg *config.Config) *Service {
 		clientID:     cfg.OIDCClientID,
 		clientSecret: cfg.OIDCClientSecret,
 		redirectURI:  redirectURI,
-		scopes:       "openid profile phone",
+		scopes:       FilterAllowedScopes("openid profile phone"),
 		pkceStore:    NewPKCEStore(),
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
@@ -168,8 +211,9 @@ func (s *Service) GeneratePKCE() (verifier, challenge string, err error) {
 	return verifier, challenge, nil
 }
 
-// CreateAuthorizeRequest generates PKCE, state, nonce, and the authorization URL
-func (s *Service) CreateAuthorizeRequest() (*AuthorizeRequestResult, error) {
+// CreateAuthorizeRequest generates PKCE, state, nonce, and the authorization URL.
+// Any requested custom scopes are strictly sanitized to allow only "openid", "profile", and "phone".
+func (s *Service) CreateAuthorizeRequest(customScopes ...string) (*AuthorizeRequestResult, error) {
 	stateBytes := make([]byte, 24)
 	if _, err := rand.Read(stateBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate random state: %w", err)
@@ -189,11 +233,18 @@ func (s *Service) CreateAuthorizeRequest() (*AuthorizeRequestResult, error) {
 
 	s.pkceStore.Set(state, verifier, nonce)
 
+	scope := s.scopes
+	if len(customScopes) > 0 && strings.TrimSpace(customScopes[0]) != "" {
+		scope = FilterAllowedScopes(customScopes[0])
+	} else {
+		scope = FilterAllowedScopes(scope)
+	}
+
 	params := url.Values{}
 	params.Set("response_type", "code")
 	params.Set("client_id", s.clientID)
 	params.Set("redirect_uri", s.redirectURI)
-	params.Set("scope", s.scopes)
+	params.Set("scope", scope)
 	params.Set("state", state)
 	params.Set("nonce", nonce)
 	params.Set("code_challenge", challenge)

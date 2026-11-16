@@ -16,6 +16,54 @@ import (
 	"chat-htp-api/internal/oidc"
 )
 
+func TestFilterAllowedScopes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Default when empty",
+			input:    "",
+			expected: "openid profile phone",
+		},
+		{
+			name:     "Exact match space separated",
+			input:    "openid profile phone",
+			expected: "openid profile phone",
+		},
+		{
+			name:     "Exact match comma separated",
+			input:    "openid,profile,phone",
+			expected: "openid profile phone",
+		},
+		{
+			name:     "Strips unallowed scopes like email, offline_access, admin",
+			input:    "openid email profile offline_access phone admin",
+			expected: "openid profile phone",
+		},
+		{
+			name:     "Input only unallowed scopes defaults to allowed set",
+			input:    "email address offline_access",
+			expected: "openid profile phone",
+		},
+		{
+			name:     "Only profile and phone will auto-include openid",
+			input:    "profile,phone",
+			expected: "openid profile phone",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := oidc.FilterAllowedScopes(tc.input)
+			if got != tc.expected {
+				t.Errorf("FilterAllowedScopes(%q) = %q, expected %q", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestPKCEGeneration(t *testing.T) {
 	cfg := &config.Config{
 		HTPOIDCIssuer:    "http://mock-issuer:5054",

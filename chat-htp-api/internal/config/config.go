@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -22,6 +23,15 @@ type Config struct {
 	OIDCClientID      string
 	OIDCClientSecret  string
 	OIDCRedirectURI   string
+
+	// API PostgreSQL Database Configuration (GORM)
+	APIDBHost     string
+	APIDBPort     string
+	APIDBUser     string
+	APIDBPassword string
+	APIDBName     string
+	APIDBSSLMode  string
+	APIDBDSN      string
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -44,6 +54,14 @@ func LoadConfig() (*Config, error) {
 	oidcClientSecret := getEnv("OIDC_CLIENT_SECRET", "")
 	oidcRedirectURI := getEnv("OIDC_REDIRECT_URI", "http://localhost:8080/api-server/auth/callback")
 
+	apiDBHost := getEnv("API_DB_HOST", "localhost")
+	apiDBPort := getEnv("API_DB_PORT", "5433")
+	apiDBUser := getEnv("API_DB_USER", "chat_api")
+	apiDBPassword := getEnv("API_DB_PASSWORD", "chat_api_secret")
+	apiDBName := getEnv("API_DB_NAME", "chat_api_db")
+	apiDBSSLMode := getEnv("API_DB_SSLMODE", "disable")
+	apiDBDSN := getEnv("API_DB_DSN", "")
+
 	parsedURL, err := url.Parse(rawSynapseURL)
 	if err != nil {
 		return nil, err
@@ -62,7 +80,23 @@ func LoadConfig() (*Config, error) {
 		OIDCClientID:      oidcClientID,
 		OIDCClientSecret:  oidcClientSecret,
 		OIDCRedirectURI:   oidcRedirectURI,
+		APIDBHost:         apiDBHost,
+		APIDBPort:         apiDBPort,
+		APIDBUser:         apiDBUser,
+		APIDBPassword:     apiDBPassword,
+		APIDBName:         apiDBName,
+		APIDBSSLMode:      apiDBSSLMode,
+		APIDBDSN:          apiDBDSN,
 	}, nil
+}
+
+// GetAPIDBDSN returns the connection string for GORM PostgreSQL
+func (c *Config) GetAPIDBDSN() string {
+	if c.APIDBDSN != "" {
+		return c.APIDBDSN
+	}
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
+		c.APIDBHost, c.APIDBPort, c.APIDBUser, c.APIDBPassword, c.APIDBName, c.APIDBSSLMode)
 }
 
 func getEnv(key, defaultVal string) string {

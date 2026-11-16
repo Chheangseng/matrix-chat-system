@@ -14,6 +14,11 @@ This repository sets up a self-hosted [Matrix](https://matrix.org/) homeserver p
                     │         ├──► [ Custom Middlewares: CORS, Log, Recovery]│
                     │         │                                              │
                     │         ├──► [ Custom API Routes: /api-server/* ]      │
+                    │         │         │                                    │
+                    │         │         ├──► [ GORM ORM ]                    │
+                    │         │         │         │                          │
+                    │         │         │         ▼                          │
+                    │         │         │   [ PostgreSQL (chat-api-db :5433) ]
                     │         │                                              │
                     │         └──► [ Matrix Proxy Middleware (httputil) ]    │
                     └──────────────────────────┬─────────────────────────────┘
@@ -64,10 +69,18 @@ SYNAPSE_REPORT_STATS=no
 SYNAPSE_ADMIN_USER=admin
 SYNAPSE_ADMIN_PASSWORD=admin_password_123
 
-# Database Configuration
+# Synapse Database Configuration (PostgreSQL for Matrix Synapse)
 POSTGRES_USER=synapse
 POSTGRES_PASSWORD=synapse_secret_password
 POSTGRES_DB=synapse
+
+# API Database Configuration (Dedicated PostgreSQL for chat-htp-api via GORM)
+API_DB_HOST=localhost
+API_DB_PORT=5433
+API_DB_USER=chat_api
+API_DB_PASSWORD=chat_api_secret
+API_DB_NAME=chat_api_db
+API_DB_SSLMODE=disable
 ```
 
 ### 2. Start the Matrix Backend (Docker Compose)

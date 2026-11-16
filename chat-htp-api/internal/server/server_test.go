@@ -38,7 +38,7 @@ func TestServerRouting(t *testing.T) {
 		AllowedOrigins: "*",
 	}
 
-	srv := server.New(cfg)
+	srv := server.New(cfg, nil)
 
 	tests := []struct {
 		name              string

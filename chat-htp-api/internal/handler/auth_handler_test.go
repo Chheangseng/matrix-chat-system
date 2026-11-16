@@ -32,6 +32,11 @@ func setupOIDCAndSynapseMock(t *testing.T) (*httptest.Server, *config.Config, *o
 
 		// Synapse Create or Update User (PUT)
 		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/_synapse/admin/v2/users/"):
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if pw, ok := body["password"].(string); ok && pw != "Pass_testuser_Secret987!" {
+				t.Errorf("expected deterministic password Pass_testuser_Secret987!, got %s", pw)
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{
 				"name": "@htp_testuser:localhost",
@@ -131,7 +136,7 @@ func TestAuthHandler_Login(t *testing.T) {
 	mockServer, cfg, oidcSvc, adminClient := setupOIDCAndSynapseMock(t)
 	defer mockServer.Close()
 
-	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg)
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
 	router := setupAuthRouter(authHandler)
 
 	t.Run("Redirect to authorize URL by default", func(t *testing.T) {
@@ -169,7 +174,7 @@ func TestAuthHandler_Callback_Success(t *testing.T) {
 	mockServer, cfg, oidcSvc, adminClient := setupOIDCAndSynapseMock(t)
 	defer mockServer.Close()
 
-	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg)
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
 	router := setupAuthRouter(authHandler)
 
 	// Pre-create authorize request to register state
@@ -211,7 +216,7 @@ func TestAuthHandler_Exchange_Success(t *testing.T) {
 	mockServer, cfg, oidcSvc, adminClient := setupOIDCAndSynapseMock(t)
 	defer mockServer.Close()
 
-	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg)
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
 	router := setupAuthRouter(authHandler)
 
 	authReq, _ := oidcSvc.CreateAuthorizeRequest()
@@ -242,7 +247,7 @@ func TestAuthHandler_MobileLogin(t *testing.T) {
 	mockServer, cfg, oidcSvc, adminClient := setupOIDCAndSynapseMock(t)
 	defer mockServer.Close()
 
-	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg)
+	authHandler := handler.NewAuthHandler(oidcSvc, adminClient, cfg, nil)
 	router := setupAuthRouter(authHandler)
 
 	// Send request with Bearer token
