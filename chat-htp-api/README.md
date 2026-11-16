@@ -81,6 +81,12 @@ API_DB_USER=chat_api
 API_DB_PASSWORD=chat_api_secret
 API_DB_NAME=chat_api_db
 API_DB_SSLMODE=disable
+
+# Customer Support Account Configuration
+SUPPORT_USER=support
+SUPPORT_PASSWORD=support_password_123
+SUPPORT_DISPLAY_NAME=Customer Support
+SUPPORT_ADMIN=false
 ```
 
 ### 2. Start the Matrix Backend (Docker Compose)
@@ -195,7 +201,27 @@ Powered by the [Synapse User Admin API](https://matrix-org.github.io/synapse/lat
 
 ---
 
-### 2. General Endpoints & Proxied Matrix APIs
+### 3. Customer Support Discovery (`/api-server/support`)
+
+The customer support account is automatically verified and provisioned on mount when the gateway starts. Client apps (`client-ui` and `customer-support-ui`) can dynamically discover the support agent:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api-server/support/info` | **Support Info**: Returns `{support_user_id, username, display_name, avatar_url}` |
+
+**Response (`200 OK`)**:
+```json
+{
+  "support_user_id": "@support:localhost",
+  "username": "support",
+  "display_name": "Customer Support",
+  "avatar_url": ""
+}
+```
+
+---
+
+### 4. General Endpoints & Proxied Matrix APIs
 | :--- | :--- | :--- |
 | `GET /api-server/healthz` | **Go Gin Gateway** | Gateway health check (`{"status":"ok"}`) |
 | `GET /api-server/info` | **Go Gin Gateway** | Gateway service metadata |

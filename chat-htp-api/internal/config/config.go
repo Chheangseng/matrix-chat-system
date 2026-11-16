@@ -32,6 +32,13 @@ type Config struct {
 	APIDBName     string
 	APIDBSSLMode  string
 	APIDBDSN      string
+
+	// Customer Support Account Configuration
+	SupportUser        string
+	SupportPassword    string
+	SupportDisplayName string
+	SupportAvatarURL   string
+	SupportAdmin       bool
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -62,32 +69,48 @@ func LoadConfig() (*Config, error) {
 	apiDBSSLMode := getEnv("API_DB_SSLMODE", "disable")
 	apiDBDSN := getEnv("API_DB_DSN", "")
 
+	supportUser := getEnv("SUPPORT_USER", "support")
+	supportPassword := getEnv("SUPPORT_PASSWORD", "support_password_123")
+	supportDisplayName := getEnv("SUPPORT_DISPLAY_NAME", "Customer Support")
+	supportAvatarURL := getEnv("SUPPORT_AVATAR_URL", "")
+	supportAdmin := getEnv("SUPPORT_ADMIN", "false") == "true"
+
 	parsedURL, err := url.Parse(rawSynapseURL)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Config{
-		Port:              port,
-		Environment:       env,
-		SynapseURL:        parsedURL,
-		AllowedOrigins:    allowedOrigins,
-		SynapseServerName: serverName,
-		AdminUser:         adminUser,
-		AdminPassword:     adminPassword,
-		AdminToken:        adminToken,
-		HTPOIDCIssuer:     oidcIssuer,
-		OIDCClientID:      oidcClientID,
-		OIDCClientSecret:  oidcClientSecret,
-		OIDCRedirectURI:   oidcRedirectURI,
-		APIDBHost:         apiDBHost,
-		APIDBPort:         apiDBPort,
-		APIDBUser:         apiDBUser,
-		APIDBPassword:     apiDBPassword,
-		APIDBName:         apiDBName,
-		APIDBSSLMode:      apiDBSSLMode,
-		APIDBDSN:          apiDBDSN,
+		Port:               port,
+		Environment:        env,
+		SynapseURL:         parsedURL,
+		AllowedOrigins:     allowedOrigins,
+		SynapseServerName:  serverName,
+		AdminUser:          adminUser,
+		AdminPassword:      adminPassword,
+		AdminToken:         adminToken,
+		HTPOIDCIssuer:      oidcIssuer,
+		OIDCClientID:       oidcClientID,
+		OIDCClientSecret:   oidcClientSecret,
+		OIDCRedirectURI:    oidcRedirectURI,
+		APIDBHost:          apiDBHost,
+		APIDBPort:          apiDBPort,
+		APIDBUser:          apiDBUser,
+		APIDBPassword:      apiDBPassword,
+		APIDBName:          apiDBName,
+		APIDBSSLMode:       apiDBSSLMode,
+		APIDBDSN:           apiDBDSN,
+		SupportUser:        supportUser,
+		SupportPassword:    supportPassword,
+		SupportDisplayName: supportDisplayName,
+		SupportAvatarURL:   supportAvatarURL,
+		SupportAdmin:       supportAdmin,
 	}, nil
+}
+
+// GetSupportUserID returns the formatted Matrix user ID for the customer support account
+func (c *Config) GetSupportUserID() string {
+	return fmt.Sprintf("@%s:%s", c.SupportUser, c.SynapseServerName)
 }
 
 // GetAPIDBDSN returns the connection string for GORM PostgreSQL

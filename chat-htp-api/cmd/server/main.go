@@ -39,6 +39,15 @@ func main() {
 
 	srvInstance := server.New(cfg, db)
 
+	// On-mount: Auto-provision or verify Customer Support account in Matrix Synapse
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		if err := srvInstance.EnsureSupportAccount(ctx); err != nil {
+			log.Printf("[WARN] Customer support account on-mount provisioning failed: %v", err)
+		}
+	}()
+
 	httpServer := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: srvInstance.Engine,

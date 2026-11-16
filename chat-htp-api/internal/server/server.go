@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"chat-htp-api/internal/config"
 	"chat-htp-api/internal/handler"
 	"chat-htp-api/internal/middleware"
 	"chat-htp-api/internal/oidc"
+	"chat-htp-api/internal/support"
 	"chat-htp-api/internal/synapse"
 
 	"github.com/gin-gonic/gin"
@@ -15,9 +17,10 @@ import (
 
 // Server wraps the Gin engine, application configuration, and database connection
 type Server struct {
-	Engine *gin.Engine
-	Config *config.Config
-	DB     *gorm.DB
+	Engine             *gin.Engine
+	Config             *config.Config
+	DB                 *gorm.DB
+	SupportProvisioner *support.Provisioner
 }
 
 // New creates and configures a new Server instance
@@ -38,9 +41,11 @@ func New(cfg *config.Config, db *gorm.DB) *Server {
 	userHandler := handler.NewUserHandler(adminClient, db)
 	oidcService := oidc.NewService(cfg)
 	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg, db)
+	supportHandler := handler.NewSupportHandler(cfg)
+	supportProvisioner := support.NewProvisioner(adminClient, cfg)
 
 	// Setup custom /api-server routes
-	registerAPIRoutes(engine, userHandler, authHandler, db)
+	registerAPIRoutes(engine, userHandler, authHandler, supportHandler, cfg, db)
 
 	// Well-known Matrix client discovery: advertise the gateway address, never the internal Synapse address
 	engine.GET("/.well-known/matrix/client", func(c *gin.Context) {
@@ -64,14 +69,24 @@ func New(cfg *config.Config, db *gorm.DB) *Server {
 	)
 
 	return &Server{
-		Engine: engine,
-		Config: cfg,
-		DB:     db,
+		Engine:             engine,
+		Config:             cfg,
+		DB:                 db,
+		SupportProvisioner: supportProvisioner,
 	}
 }
 
+// EnsureSupportAccount ensures the customer support account exists in Matrix Synapse on startup
+func (s *Server) EnsureSupportAccount(ctx context.Context) error {
+	if s.SupportProvisioner == nil {
+		return nil
+	}
+	_, err := s.SupportProvisioner.EnsureSupportAccount(ctx)
+	return err
+}
+
 // registerAPIRoutes sets up endpoints reserved for the custom backend API under /api-server
-func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler, db *gorm.DB) {
+func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler, supportHandler *handler.SupportHandler, cfg *config.Config, db *gorm.DB) {
 	api := engine.Group("/api-server")
 	{
 		// Health check endpoint
@@ -93,10 +108,17 @@ func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, aut
 		// API Info endpoint
 		api.GET("/info", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
-				"version":     "1.0.0",
-				"description": "Custom Chat API Gateway with Matrix Synapse Proxy",
+				"version":      "1.0.0",
+				"description":  "Custom Chat API Gateway with Matrix Synapse Proxy",
+				"support_user": cfg.GetSupportUserID(),
 			})
 		})
+
+		// Customer Support discovery endpoints
+		supportGroup := api.Group("/support")
+		{
+			supportGroup.GET("/info", supportHandler.GetSupportInfo)
+		}
 
 		// Authentication & OIDC endpoints
 		auth := api.Group("/auth")

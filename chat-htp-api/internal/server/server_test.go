@@ -62,7 +62,15 @@ func TestServerRouting(t *testing.T) {
 			method:            http.MethodGet,
 			expectedStatus:    http.StatusOK,
 			shouldHitBackend:  false,
-			expectedBodyField: "version",
+			expectedBodyField: "support_user",
+		},
+		{
+			name:              "Custom API customer support info",
+			path:              "/api-server/support/info",
+			method:            http.MethodGet,
+			expectedStatus:    http.StatusOK,
+			shouldHitBackend:  false,
+			expectedBodyField: "support_user_id",
 		},
 		{
 			name:              "Custom API auth login (JSON format)",
