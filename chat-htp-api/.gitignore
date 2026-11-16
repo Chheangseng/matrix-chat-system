@@ -1,0 +1,10 @@
+# Matrix Synapse local data & keys
+data/
+*.signing.key
+*.log
+*.db
+.env
+.admin_token
+
+# Go build binaries
+bin/

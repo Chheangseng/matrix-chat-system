@@ -1,0 +1,62 @@
+services:
+  synapse-db:
+    image: postgres:16-alpine
+    container_name: synapse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapse_secret_password}
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - synapse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse} -d ${POSTGRES_DB:-synapse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - matrix-net
+
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: matrix-synapse
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SYNAPSE_HTTP_PORT:-8008}:8008"
+    volumes:
+      - ./data:/data
+    environment:
+      - SYNAPSE_CONFIG_PATH=/data/homeserver.yaml
+    depends_on:
+      synapse-db:
+        condition: service_healthy
+    networks:
+      - matrix-net
+
+  # Auto-provision default Synapse admin user on startup
+  synapse-init-admin:
+    image: matrixdotorg/synapse:latest
+    container_name: synapse-init-admin
+    depends_on:
+      synapse:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        register_new_matrix_user -u "$${SYNAPSE_ADMIN_USER:-admin}" -p "$${SYNAPSE_ADMIN_PASSWORD:-admin_password_123}" -a --exists-ok -c /data/homeserver.yaml http://synapse:8008
+    environment:
+      - SYNAPSE_ADMIN_USER=${SYNAPSE_ADMIN_USER:-admin}
+      - SYNAPSE_ADMIN_PASSWORD=${SYNAPSE_ADMIN_PASSWORD:-admin_password_123}
+    volumes:
+      - ./data:/data
+    networks:
+      - matrix-net
+    restart: "no"
+
+volumes:
+  synapse-db-data:
+
+networks:
+  matrix-net:
+    driver: bridge
