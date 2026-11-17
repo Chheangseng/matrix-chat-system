@@ -76,6 +76,21 @@ services:
     networks:
       - matrix-net
 
+  # Element Web UI Client
+  element:
+    image: vectorim/element-web:latest
+    container_name: element-web
+    restart: unless-stopped
+    ports:
+      - "${ELEMENT_PORT:-8085}:80"
+    volumes:
+      - ./data/element-config.json:/app/config.json:ro
+    depends_on:
+      synapse:
+        condition: service_healthy
+    networks:
+      - matrix-net
+
 volumes:
   synapse-db-data:
   chat-api-db-data:
