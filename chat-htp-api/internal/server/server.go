@@ -38,14 +38,12 @@ func New(cfg *config.Config, db *gorm.DB) *Server {
 
 	// Synapse Admin Client & Handlers
 	adminClient := synapse.NewAdminClient(cfg)
-	userHandler := handler.NewUserHandler(adminClient, db)
 	oidcService := oidc.NewService(cfg)
 	authHandler := handler.NewAuthHandler(oidcService, adminClient, cfg, db)
-	supportHandler := handler.NewSupportHandler(cfg, db)
-	supportProvisioner := support.NewProvisioner(adminClient, cfg, db)
+	supportProvisioner := support.NewProvisioner(adminClient, cfg)
 
 	// Setup custom /api-server routes
-	registerAPIRoutes(engine, userHandler, authHandler, supportHandler, cfg, db)
+	registerAPIRoutes(engine, authHandler, cfg, db)
 
 	// Well-known Matrix client discovery: advertise the gateway address, never the internal Synapse address
 	engine.GET("/.well-known/matrix/client", func(c *gin.Context) {
@@ -86,7 +84,7 @@ func (s *Server) EnsureSupportAccount(ctx context.Context) error {
 }
 
 // registerAPIRoutes sets up endpoints reserved for the custom backend API under /api-server
-func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, authHandler *handler.AuthHandler, supportHandler *handler.SupportHandler, cfg *config.Config, db *gorm.DB) {
+func registerAPIRoutes(engine *gin.Engine, authHandler *handler.AuthHandler, cfg *config.Config, db *gorm.DB) {
 	api := engine.Group("/api-server")
 	{
 		// Health check endpoint
@@ -114,29 +112,11 @@ func registerAPIRoutes(engine *gin.Engine, userHandler *handler.UserHandler, aut
 			})
 		})
 
-		// Customer Support discovery endpoints
-		supportGroup := api.Group("/support")
-		{
-			supportGroup.GET("/info", supportHandler.GetSupportInfo)
-		}
-
 		// Authentication & OIDC endpoints
 		auth := api.Group("/auth")
 		{
-			auth.GET("/login", authHandler.Login)
 			auth.GET("/callback", authHandler.Callback)
-			auth.POST("/exchange", authHandler.Exchange)
-			auth.POST("/pre-auth", authHandler.PreAuth)
 			auth.POST("/mobile-login", authHandler.MobileLogin)
-			auth.POST("/support-login", authHandler.SupportLogin)
-		}
-
-		// User Management endpoints (Synapse User Admin API)
-		users := api.Group("/users")
-		{
-			users.POST("", userHandler.CreateUser)
-			users.GET("", userHandler.ListUsers)
-			users.GET("/:id", userHandler.GetUser)
 		}
 	}
 }

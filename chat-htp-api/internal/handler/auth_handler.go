@@ -39,21 +39,9 @@ func NewAuthHandler(oidcService *oidc.Service, adminClient *synapse.AdminClient,
 	}
 }
 
-// ExchangeRequest represents the payload for POST /api-server/auth/exchange
-type ExchangeRequest struct {
-	Code  string `json:"code" binding:"required"`
-	State string `json:"state"`
-}
-
-// MobileLoginRequest represents the payload for POST /api-server/auth/mobile-login
-type MobileLoginRequest struct {
-	Token string `json:"htp_token"`
-}
-
-// SupportLoginRequest represents credentials for customer support staff login
-type SupportLoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+type preAuthBody struct {
+	Token    string `json:"token"`
+	HTPToken string `json:"htp_token"`
 }
 
 // provisionMatrixUserAndLogin provisions or updates the user profile in Synapse and logs them in
@@ -135,39 +123,7 @@ func (h *AuthHandler) ensureCustomerSupportRoom(ctx context.Context, userToken, 
 		}
 	}
 
-	// 3. Check Synapse joined rooms for common membership
-	userRooms, err := h.adminClient.GetUserJoinedRooms(ctx, "", userID)
-	if err == nil {
-		for _, roomID := range userRooms {
-			members, err := h.adminClient.GetRoomMembers(ctx, "", roomID)
-			if err == nil {
-				hasUser := false
-				hasSupport := false
-				for _, m := range members {
-					if m == userID {
-						hasUser = true
-					}
-					if m == supportUserID {
-						hasSupport = true
-					}
-				}
-				if hasUser && hasSupport {
-					_ = h.adminClient.AddUserDirectRoom(ctx, userToken, userID, supportUserID, roomID)
-					_ = h.adminClient.AddUserDirectRoom(ctx, "", supportUserID, userID, roomID)
-					if h.db != nil {
-						_ = h.db.WithContext(ctx).Create(&models.CustomerSupportRoom{
-							RoomID:        roomID,
-							UserID:        userID,
-							SupportUserID: supportUserID,
-						}).Error
-					}
-					return roomID, nil
-				}
-			}
-		}
-	}
-
-	// 4. No room exists: create a new 1-on-1 direct message room
+	// 3. No room exists: create a new 1-on-1 direct message room
 	roomName := fmt.Sprintf("Support: %s", h.cfg.SupportDisplayName)
 	roomTopic := "Direct 1-on-1 customer support chat"
 	roomID, err := h.adminClient.CreateDirectRoom(ctx, userToken, supportUserID, roomName, roomTopic)
@@ -175,16 +131,16 @@ func (h *AuthHandler) ensureCustomerSupportRoom(ctx context.Context, userToken, 
 		return "", fmt.Errorf("failed to create 1:1 support room: %w", err)
 	}
 
-	// 5. Force-join support account to the newly created room
+	// 4. Force-join support account to the newly created room
 	if err := h.adminClient.JoinUserToRoom(ctx, "", roomID, supportUserID); err != nil {
 		log.Printf("[WARN] Failed to auto-join support user %s to room %s: %v", supportUserID, roomID, err)
 	}
 
-	// 6. Record in m.direct account data for both user and support
+	// 5. Record in m.direct account data for both user and support
 	_ = h.adminClient.AddUserDirectRoom(ctx, userToken, userID, supportUserID, roomID)
 	_ = h.adminClient.AddUserDirectRoom(ctx, "", supportUserID, userID, roomID)
 
-	// 7. Persist to PostgreSQL database (triggers BeforeCreate for UUID v7)
+	// 6. Persist to PostgreSQL database
 	if h.db != nil {
 		roomRecord := models.CustomerSupportRoom{
 			RoomID:        roomID,
@@ -198,33 +154,6 @@ func (h *AuthHandler) ensureCustomerSupportRoom(ctx context.Context, userToken, 
 
 	log.Printf("[INFO] Established default 1:1 customer support room: %s (user: %s, support: %s)", roomID, userID, supportUserID)
 	return roomID, nil
-}
-
-// Login handles GET /api-server/auth/login
-// Redirects the client to HTP OIDC authorize endpoint or returns the URL as JSON.
-// Only scopes "openid", "profile", and "phone" are allowed.
-func (h *AuthHandler) Login(c *gin.Context) {
-	requestedScope := c.Query("scope")
-	authReq, err := h.oidcService.CreateAuthorizeRequest(requestedScope)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errcode": "M_OIDC_ERROR",
-			"error":   fmt.Sprintf("Failed to generate authorize request: %v", err),
-		})
-		return
-	}
-
-	// Return JSON if requested
-	if c.Query("format") == "json" || strings.Contains(c.GetHeader("Accept"), "application/json") {
-		c.JSON(http.StatusOK, gin.H{
-			"authorize_url": authReq.URL,
-			"state":         authReq.State,
-		})
-		return
-	}
-
-	// Otherwise perform standard browser redirect
-	c.Redirect(http.StatusFound, authReq.URL)
 }
 
 // Callback handles GET /api-server/auth/callback
@@ -331,149 +260,6 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	c.JSON(http.StatusOK, responseData)
 }
 
-// Exchange handles POST /api-server/auth/exchange
-// Direct endpoint to exchange authorization code and state for a Matrix session
-func (h *AuthHandler) Exchange(c *gin.Context) {
-	var req ExchangeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errcode": "M_BAD_JSON",
-			"error":   "Missing or invalid required parameter: code",
-		})
-		return
-	}
-
-	profile, err := h.oidcService.ExchangeCode(c.Request.Context(), req.Code, req.State)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errcode": "M_OIDC_EXCHANGE_FAILED",
-			"error":   fmt.Sprintf("Failed to exchange authorization code: %v", err),
-		})
-		return
-	}
-
-	matrixSession, err := h.provisionMatrixUserAndLogin(c.Request.Context(), profile)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errcode": "M_SYNAPSE_PROVISION_FAILED",
-			"error":   fmt.Sprintf("Failed to initialize Matrix user account: %v", err),
-		})
-		return
-	}
-
-	clientRedirectURL := fmt.Sprintf("%s?auth_token=%s&room_id=%s&user_id=%s",
-		h.cfg.ClientUIURL,
-		url.QueryEscape(matrixSession.AccessToken),
-		url.QueryEscape(matrixSession.SupportRoomID),
-		url.QueryEscape(matrixSession.UserID),
-	)
-
-	c.JSON(http.StatusOK, gin.H{
-		"redirect_to":     clientRedirectURL,
-		"matrix":          matrixSession,
-		"support_room_id": matrixSession.SupportRoomID,
-		"user": gin.H{
-			"sub":          profile.Sub,
-			"name":         profile.Name,
-			"nickname":     profile.Nickname,
-			"phone_number": profile.PhoneNumber,
-			"picture":      profile.Picture,
-		},
-		"oidc": gin.H{
-			"access_token": profile.AccessToken,
-			"id_token":     profile.IDToken,
-		},
-	})
-}
-
-// SupportLogin handles POST /api-server/auth/support-login
-// Authenticates support staff with username and password, strictly verifying that
-// the user is a designated customer support account, and returns Matrix session credentials.
-func (h *AuthHandler) SupportLogin(c *gin.Context) {
-	var req SupportLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errcode": "M_BAD_JSON",
-			"error":   "Missing or invalid required fields: username and password",
-		})
-		return
-	}
-
-	trimmedUser := strings.TrimSpace(req.Username)
-	supportUserID := h.cfg.GetSupportUserID()
-
-	// Verify authorization: must match configured support user or registered customer support record
-	isAuthorized := false
-	if trimmedUser == h.cfg.SupportUser || trimmedUser == supportUserID ||
-		h.adminClient.FormatUserID(trimmedUser) == supportUserID {
-		isAuthorized = true
-	} else if h.db != nil {
-		var cs models.CustomerSupport
-		if err := h.db.WithContext(c.Request.Context()).
-			Where("username = ? OR matrix_user_id = ?", trimmedUser, h.adminClient.FormatUserID(trimmedUser)).
-			First(&cs).Error; err == nil && cs.Status == "active" {
-			isAuthorized = true
-		}
-	}
-
-	if !isAuthorized {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errcode": "M_FORBIDDEN",
-			"error":   "Account is not authorized for customer support access",
-		})
-		return
-	}
-
-	loginTarget := trimmedUser
-	if !strings.HasPrefix(loginTarget, "@") {
-		loginTarget = supportUserID
-	}
-
-	session, err := h.adminClient.LoginWithPassword(c.Request.Context(), loginTarget, req.Password)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errcode": "M_UNAUTHORIZED",
-			"error":   fmt.Sprintf("Invalid username or password: %v", err),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"matrix": session,
-		"user": gin.H{
-			"username":     h.cfg.SupportUser,
-			"user_id":      session.UserID,
-			"display_name": h.cfg.SupportDisplayName,
-			"avatar_url":   h.cfg.SupportAvatarURL,
-			"role":         "support_agent",
-		},
-	})
-}
-
-// PreAuth handles POST /api-server/auth/pre-auth
-// Simulates mobile app pre-authorization and returns challenge and redirect_to
-func (h *AuthHandler) PreAuth(c *gin.Context) {
-	token := extractBearerOrBodyToken(c)
-	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errcode": "M_MISSING_TOKEN",
-			"error":   "HTP Bearer token is required in Authorization header or JSON body",
-		})
-		return
-	}
-
-	result, err := h.oidcService.SimulateMobilePreAuth(c.Request.Context(), token)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errcode": "M_PREAUTH_FAILED",
-			"error":   fmt.Sprintf("Mobile pre-authorization failed: %v", err),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, result)
-}
-
 // MobileLogin handles POST /api-server/auth/mobile-login
 // Seamless single-call login for mobile applications: accepts HTP user token, runs pre-auth,
 // exchanges code, auto-provisions user, and returns ready-to-use Matrix access token.
@@ -570,9 +356,14 @@ func extractBearerOrBodyToken(c *gin.Context) string {
 		return strings.TrimSpace(authHeader[7:])
 	}
 
-	var req MobileLoginRequest
-	if err := c.ShouldBindJSON(&req); err == nil && req.Token != "" {
-		return strings.TrimSpace(req.Token)
+	var req preAuthBody
+	if err := c.ShouldBindJSON(&req); err == nil {
+		if req.HTPToken != "" {
+			return strings.TrimSpace(req.HTPToken)
+		}
+		if req.Token != "" {
+			return strings.TrimSpace(req.Token)
+		}
 	}
 
 	return ""

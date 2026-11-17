@@ -123,11 +123,8 @@ Integrates with HTP OIDC Issuer (supporting PKCE S256, UserInfo discovery, and m
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api-server/auth/login` | **Initiate Login**: Redirects browser to OIDC authorize URL or returns `{authorize_url, state}` if `?format=json` |
 | `GET` | `/api-server/auth/callback` | **OIDC Callback**: Handles code exchange, auto-provisions Synapse account, and returns Matrix session + user profile |
-| `POST` | `/api-server/auth/exchange` | **Direct Exchange**: Receives `{code, state}`, completes token exchange & Matrix provisioning |
 | `POST` | `/api-server/auth/mobile-login` | **Seamless Mobile SSO**: Accepts existing HTP Bearer token, auto-completes pre-auth, and directly returns Matrix access token |
-| `POST` | `/api-server/auth/pre-auth` | **Mobile Pre-Auth**: Performs pre-auth request and returns `{challenge, redirect_to}` |
 
 #### Mobile Single Sign-On Example (`POST /api-server/auth/mobile-login`):
 Headers: `Authorization: Bearer <htp_user_bearer_token>` (or JSON body: `{"token": "<token>"}`)
@@ -157,71 +154,7 @@ Headers: `Authorization: Bearer <htp_user_bearer_token>` (or JSON body: `{"token
 
 ---
 
-### 2. Custom User Management APIs (`/api-server/users`)
-
-Powered by the [Synapse User Admin API](https://matrix-org.github.io/synapse/latest/admin_api/user_admin_api.html):
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api-server/users` | **Create or modify a user account** |
-| `GET` | `/api-server/users/:id` | **Query a user account** by localpart (`alice`) or full ID (`@alice:localhost`) |
-| `GET` | `/api-server/users` | **List users** with pagination (`?limit=10&from=...`) |
-
-#### Create User Example (`POST /api-server/users`):
-```json
-{
-  "username": "emma",
-  "password": "emma_password_123",
-  "display_name": "Emma Watson",
-  "admin": false
-}
-```
-**Response (`201 Created`)**:
-```json
-{
-  "name": "@emma:localhost",
-  "admin": false,
-  "deactivated": false,
-  "displayname": "Emma Watson",
-  "creation_ts": 1794815713
-}
-```
-
-#### Get User Example (`GET /api-server/users/emma`):
-**Response (`200 OK`)**:
-```json
-{
-  "name": "@emma:localhost",
-  "admin": false,
-  "deactivated": false,
-  "displayname": "Emma Watson",
-  "creation_ts": 1794815713
-}
-```
-
----
-
-### 3. Customer Support Discovery (`/api-server/support`)
-
-The customer support account is automatically verified and provisioned on mount when the gateway starts. Client apps (`client-ui` and `customer-support-ui`) can dynamically discover the support agent:
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api-server/support/info` | **Support Info**: Returns `{support_user_id, username, display_name, avatar_url}` |
-
-**Response (`200 OK`)**:
-```json
-{
-  "support_user_id": "@support:localhost",
-  "username": "support",
-  "display_name": "Customer Support",
-  "avatar_url": ""
-}
-```
-
----
-
-### 4. General Endpoints & Proxied Matrix APIs
+### 2. General Endpoints & Proxied Matrix APIs
 | :--- | :--- | :--- |
 | `GET /api-server/healthz` | **Go Gin Gateway** | Gateway health check (`{"status":"ok"}`) |
 | `GET /api-server/info` | **Go Gin Gateway** | Gateway service metadata |

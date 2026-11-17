@@ -103,6 +103,7 @@ type UserProfile struct {
 
 // MobilePreAuthResult represents the result of the seamless mobile pre-authorization flow
 type MobilePreAuthResult struct {
+	Success    bool   `json:"success"`
 	Challenge  string `json:"challenge"`
 	RedirectTo string `json:"redirect_to"`
 	State      string `json:"state"`
@@ -508,6 +509,7 @@ func (s *Service) SimulateMobilePreAuth(ctx context.Context, htpBearerToken stri
 	}
 
 	return &MobilePreAuthResult{
+		Success:    true,
 		Challenge:  challenge,
 		RedirectTo: redirectTo,
 		State:      authReq.State,

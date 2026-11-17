@@ -40,13 +40,6 @@ type CreateUserPayload struct {
 	Deactivated bool   `json:"deactivated,omitempty"`
 }
 
-// UserListResponse represents paginated list of users from Synapse
-type UserListResponse struct {
-	Users     []SynapseUser `json:"users"`
-	NextToken string        `json:"next_token,omitempty"`
-	Total     int           `json:"total"`
-}
-
 // AdminAPIError represents an error returned by Synapse
 type AdminAPIError struct {
 	StatusCode int
@@ -273,68 +266,6 @@ func (c *AdminClient) CreateOrUpdateUser(ctx context.Context, token, rawUserID s
 		return nil, err
 	}
 	return &user, nil
-}
-
-// GetUser queries a user's details via GET /_synapse/admin/v2/users/<user_id>
-func (c *AdminClient) GetUser(ctx context.Context, token, rawUserID string) (*SynapseUser, error) {
-	fullUserID := c.FormatUserID(rawUserID)
-	path := fmt.Sprintf("/_synapse/admin/v2/users/%s", url.PathEscape(fullUserID))
-
-	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if statusCode != http.StatusOK {
-		var apiErr AdminAPIError
-		apiErr.StatusCode = statusCode
-		_ = json.Unmarshal(respBytes, &apiErr)
-		if apiErr.ErrorMsg == "" {
-			apiErr.ErrorMsg = string(respBytes)
-		}
-		return nil, &apiErr
-	}
-
-	var user SynapseUser
-	if err := json.Unmarshal(respBytes, &user); err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
-// ListUsers queries multiple users via GET /_synapse/admin/v2/users
-func (c *AdminClient) ListUsers(ctx context.Context, token, from string, limit int, guests, deactivated bool) (*UserListResponse, error) {
-	vals := url.Values{}
-	if from != "" {
-		vals.Set("from", from)
-	}
-	if limit > 0 {
-		vals.Set("limit", fmt.Sprintf("%d", limit))
-	}
-	vals.Set("guests", fmt.Sprintf("%t", guests))
-	vals.Set("deactivated", fmt.Sprintf("%t", deactivated))
-
-	path := fmt.Sprintf("/_synapse/admin/v2/users?%s", vals.Encode())
-	respBytes, statusCode, err := c.doRequest(ctx, token, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if statusCode != http.StatusOK {
-		var apiErr AdminAPIError
-		apiErr.StatusCode = statusCode
-		_ = json.Unmarshal(respBytes, &apiErr)
-		if apiErr.ErrorMsg == "" {
-			apiErr.ErrorMsg = string(respBytes)
-		}
-		return nil, &apiErr
-	}
-
-	var listResp UserListResponse
-	if err := json.Unmarshal(respBytes, &listResp); err != nil {
-		return nil, err
-	}
-	return &listResp, nil
 }
 
 // MatrixLoginResponse represents the session response returned when logging in as a user

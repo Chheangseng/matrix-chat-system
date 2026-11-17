@@ -326,6 +326,9 @@ func TestSimulateMobilePreAuth_Success(t *testing.T) {
 		t.Fatalf("unexpected error in pre-auth: %v", err)
 	}
 
+	if !res.Success {
+		t.Errorf("expected Success true, got false")
+	}
 	if res.Challenge != "mock_challenge_abc_123" {
 		t.Errorf("expected challenge 'mock_challenge_abc_123', got %s", res.Challenge)
 	}

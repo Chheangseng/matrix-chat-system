@@ -66,7 +66,6 @@ func AutoMigrate(db *gorm.DB) error {
 		return nil
 	}
 	if err := db.AutoMigrate(
-		&models.CustomerSupport{},
 		&models.CustomerSupportRoom{},
 	); err != nil {
 		return fmt.Errorf("failed to auto-migrate database entities: %w", err)
