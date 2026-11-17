@@ -298,6 +298,11 @@ func TestAuthHandler_MobileLogin(t *testing.T) {
 	if matrix["access_token"] != "syt_mock_matrix_token_12345" {
 		t.Errorf("expected valid matrix token from mobile login, got %v", matrix["access_token"])
 	}
+
+	redirectTo, ok := res["redirect_to"].(string)
+	if !ok || !strings.Contains(redirectTo, "auth_token=") || !strings.Contains(redirectTo, "room_id=") {
+		t.Errorf("expected valid redirect_to with auth_token and room_id, got %v", res["redirect_to"])
+	}
 }
 
 func TestAuthHandler_CustomerSupportRoom_CreationAndDedup(t *testing.T) {

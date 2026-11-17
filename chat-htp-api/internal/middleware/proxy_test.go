@@ -32,6 +32,7 @@ func TestMatrixProxy_Forwarding(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Server", "Synapse/1.161.0")
 			w.Header().Set("Synapse-Trace-Id", "trace-xyz-123")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Expose-Headers", "Synapse-Trace-Id, Server, Content-Type")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"versions":["v1.12"]}`))
@@ -62,6 +63,7 @@ func TestMatrixProxy_Forwarding(t *testing.T) {
 	}
 
 	router := gin.New()
+	router.Use(middleware.CORSMiddleware("*"))
 	router.NoRoute(middleware.MatrixProxy(backendURL))
 
 	t.Run("GET /_matrix/client/versions forwards properly and conceals backend headers", func(t *testing.T) {
@@ -126,6 +128,28 @@ func TestMatrixProxy_Forwarding(t *testing.T) {
 		}
 		if rec.Body.String() != payload {
 			t.Fatalf("expected echoed body, got %s", rec.Body.String())
+		}
+	})
+
+	t.Run("CORS headers are handled without duplicate Allow-Origin from backend", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/_matrix/client/versions", nil)
+		req.Header.Set("Origin", "http://localhost:5001")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+
+		origins := rec.Header().Values("Access-Control-Allow-Origin")
+		if len(origins) != 1 {
+			t.Fatalf("expected exactly 1 Access-Control-Allow-Origin header, got %d: %v", len(origins), origins)
+		}
+		if origins[0] != "http://localhost:5001" {
+			t.Errorf("expected Access-Control-Allow-Origin 'http://localhost:5001', got '%s'", origins[0])
+		}
+		if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("expected Access-Control-Allow-Credentials to be true")
 		}
 	})
 }

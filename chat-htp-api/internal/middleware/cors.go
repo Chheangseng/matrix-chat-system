@@ -18,8 +18,16 @@ func CORSMiddleware(allowedOrigin string) gin.HandlerFunc {
 			}
 			c.Header("Access-Control-Allow-Credentials", "true")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH")
-			c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Requested-With, X-Matrix-Device-Id")
+
+			// Dynamically allow requested headers or provide comprehensive default
+			reqHeaders := c.Request.Header.Get("Access-Control-Request-Headers")
+			if reqHeaders != "" {
+				c.Header("Access-Control-Allow-Headers", reqHeaders)
+			} else {
+				c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept, Accept-Language, Accept-Encoding, X-CSRF-Token, Authorization, X-Requested-With, X-Matrix-Device-Id")
+			}
 			c.Header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Authorization")
+			c.Header("Access-Control-Max-Age", "86400")
 		}
 
 		if c.Request.Method == http.MethodOptions {

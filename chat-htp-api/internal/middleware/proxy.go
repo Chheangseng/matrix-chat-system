@@ -88,6 +88,12 @@ func MatrixProxy(target *url.URL) gin.HandlerFunc {
 		resp.Header.Del("Server")
 		resp.Header.Del("Synapse-Trace-Id")
 
+		// Strip backend CORS headers to prevent duplicate or conflicting headers with gateway CORS
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Credentials")
+		resp.Header.Del("Access-Control-Allow-Methods")
+		resp.Header.Del("Access-Control-Allow-Headers")
+
 		// Sanitize Access-Control-Expose-Headers
 		if expose := resp.Header.Get("Access-Control-Expose-Headers"); expose != "" {
 			cleaned := sanitizeExposeHeaders(expose)

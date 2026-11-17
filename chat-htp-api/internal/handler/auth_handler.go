@@ -361,7 +361,15 @@ func (h *AuthHandler) Exchange(c *gin.Context) {
 		return
 	}
 
+	clientRedirectURL := fmt.Sprintf("%s?auth_token=%s&room_id=%s&user_id=%s",
+		h.cfg.ClientUIURL,
+		url.QueryEscape(matrixSession.AccessToken),
+		url.QueryEscape(matrixSession.SupportRoomID),
+		url.QueryEscape(matrixSession.UserID),
+	)
+
 	c.JSON(http.StatusOK, gin.H{
+		"redirect_to":     clientRedirectURL,
 		"matrix":          matrixSession,
 		"support_room_id": matrixSession.SupportRoomID,
 		"user": gin.H{
@@ -530,7 +538,15 @@ func (h *AuthHandler) MobileLogin(c *gin.Context) {
 		return
 	}
 
+	clientRedirectURL := fmt.Sprintf("%s?auth_token=%s&room_id=%s&user_id=%s",
+		h.cfg.ClientUIURL,
+		url.QueryEscape(matrixSession.AccessToken),
+		url.QueryEscape(matrixSession.SupportRoomID),
+		url.QueryEscape(matrixSession.UserID),
+	)
+
 	c.JSON(http.StatusOK, gin.H{
+		"redirect_to":     clientRedirectURL,
 		"matrix":          matrixSession,
 		"support_room_id": matrixSession.SupportRoomID,
 		"user": gin.H{
